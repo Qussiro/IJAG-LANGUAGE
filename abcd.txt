@@ -1,0 +1,10 @@
+a = 32
+b = 12
+sum = a + b
+print(sum)
+
+c = 11
+ddd = 58
+cdsum = c + ddd
+
+print(cdsum)

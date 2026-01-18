@@ -1,0 +1,188 @@
+# Comments
+# This is comment
+
+# Names
+# [a-z, A-Z, _][a-z, A-Z, 0-9, _]
+# Valid:   sin, f, _g3
+# Invlaid: 2n
+
+# Number Types (math-like)
+t1 := Natural     # [1, 2, 3, ...]
+t2 := Whole       # [0, Natural]
+t3 := Integer     # [... -2, -1, Whole]
+t4 := Rational    # Integer / Natural
+t5 := Irrational  # 
+t6 := Real        # [Rational, Irrational]
+t7 := Imaginary   # sqrt(-1)
+t8 := Complex     # [Real, Imaginary]
+
+# You can specify size of number type with suffix
+t1 := Integer8
+t2 := Real32
+
+# Characters
+# Just alias to 8-bit integer type,
+# support only for ASCII
+c1 := Char
+c2 := 'A'
+
+# Strings. List of Characters
+# This
+s1 := "Hello"
+# is the same as this
+s2 := ['H', 'e', 'l', 'l', 'o', 0]
+# Would store its size and the 0 byte at the end
+# for C compatibility
+ss1 := s1'
+
+# Booleans
+b1 := True
+b2 := False
+
+# Lists
+l1 := []
+l2 := [1, 1, 2, 3, 5]
+l3 := [69..420]
+l4 := [1..]
+s1 := 'l1
+
+# Operators
+# All operators will have Polish notation
+#
+#  Name           | Syntax
+# ----------------|--------
+#  Addition       | + a b
+#  Subtraction    | - a b
+#  Negation       | - a
+#  Multiplication | * a b
+#  Division       | / a b
+#  Remainder      | % a b
+
+# Functions
+# Language will have only function definitions,
+# function applications and expressions which use functions.
+# In general function definition will take the form of:
+#     name(a1: t1, a2: t2, ... ak: tk): tr = e
+# where 'name' is name of the function (duh),
+#       'a1' through 'ak' is names of the formal parameters,
+#       't1' through 'tk' is types of the formal parameters,
+#       'tr' is type which function is evaluates to,
+#       'e'  is expression which function evaluating.
+
+# Let's start with simple add function. It will
+# accept two integers as a parameters and calculate their sum.
+add(a: Integer, b: Integer): Integer = + a b
+funny := add 34 35
+
+# If compiler can infer function return type it can be ommited.
+# Like this:
+add(a: Integer, b: Integer) := + a b
+
+# If several function arguments have the same type you can
+# combine their declarations.
+# Like this:
+add(a, b: Integer) := + a b
+
+# Now our (kkomrade) function definition looks much simpler. 
+
+# Like I said earlier this language doesn't have anything
+# except functions and expressions that using them.
+# Then what is our 'funny' thing where we stored result of
+# 'add' function.
+# Well, let's say we need some function, that doesn't take
+# any parameters and allways return one value.
+# For example let's write function which will return Pi.
+Pi(): Real = 3.1415
+
+# As we already know, we can omit return type. Then Pi will
+# take the form of:
+Pi() := 3.1415
+
+# But we also can omit parenthesis
+Pi := 3.1415
+
+# Is it all functions?
+# Allways been...
+                                                                       @@ @@. @  @@ @@           .  
+                                                                                                    
+                                                                                    :@@@            
+  *                                                        :       *            @@@@@@@@@@@         
+     @               @@%@%#%@@####%@@@                                       @@@@@@@####*#@@@       
+                  @@**@%@@@ ...:#@....@%%           .                              @#%@@@**@@       
+                @@@@=@-:. ::*..=.:-* .+:-+%                                        @*%  @**#@       
+              @+%-.+-:-::--.:-=+:- ..  .. :=*                              @     @ @@@@@@*##@       
+            @%-%++@+:+*.+= @@* : --.:*@......:                                 @*@@ @%@%@@@@@       
+           @#+%:+:-=.= :-:::- +@ .  ..     .  .                       @     @@ @@@@@  @% %          
+           %. *-+ .::= %*..% @   @ @@ :@ @@ @@.                             @ @@  #@@@@#@@@@@@@@@@  
+          @+=@=+:#=@.#* ##   +:=                      @                       @ @@@%#####*%*-#    @@
+          @#.*-==--.**#@@@@@@   .  ........+                          *     .   @-@@%@@@@@@@@@@  @@ 
+         .@..+*@@..@*=:  @:    ...::-     .  @@@@@@@@          @@@@           @@. @@ - @.  @  @@@@#:
+   .     :%..@. =*+@   :-  : .:       = : ..   -@*+@@       @@@@#: @@        @@@@ #@@@@%@@%@@ @ #@#-
+          @-*+# #+.%%=  =.  .+-...        .   @@*#@@            @ @@@@@@@@@@@ @+#@=@ ###%%*#@@   @#:
+   .      @+-:=.  :+:.@:  .    .   =%  ...  @@ @#@: @               @@@@@@@*@+@##%+%%%%@@@@@=@ @@@#-
+           %..-%#%*-:.=+  @@.    : .%.* .     @%*@@ @@:                   # @@**+#@@@@%=   .+@ @@*#:
+           @*+...+=@-  + .   .@   ...*      @@@@=+ .  =@                    @#@#*#= @:@ #@@@ %  @*#:
+            :%++..:..=- . . . ......       @@ = @ @ @@@@@           .+      @ =@%#@-@   @+%%+%+ @*#:
+              @#*...:-. ... . .:.:        %@@%@@=    @%-@@                 @@@@ @#@ @@@@@%#*@@@ @*#:
+                %#+:.. %**:...:           @@@@+@ # = @%@@                  @**@@@%#***%*#%#**@@ @+#:
+                  ###*:......             @@ @@@  :@ @%@#        : :       @@*####@%@#%#**#@%@  @@#:
+                                          @@@%@      @%@  . .              =@*#**@ @@@%*@%**@@   @#:
+ -                               -        @#@@-      @#@                    @#*##@  @ =#*+**@@   @@-
+        *                          .     @@@@#.  .   @@@                    @@+#*@@@@@@@@@@@@=   @@.
+        .       @        =              @@@:: @  -.  .                      @+#*%*+@*=#%%   * :   @ 
+                     .               .  @=% @@@    :         .         = .  @@%+@@+@*%+@@*@*@: @    
+                                       @@* :*-                               %: -:  .::% @         @
+
+# Actually all operators is also just built in functions.
+# That's also why they have Normal Polish notation.
+# So our function 'add' and operator '+' are identical.
+sum1 := + 1 2
+sum2 := add 1 2
+
+# If you have deeply nested function applications
+a := f (g (h x))
+# you can use $ syntax for convenience.
+b := f $ g $ h x
+
+# Note that this
+a := f $ g x
+# and this
+b := f g x
+# is not the same.
+# In first example we pass to function 'f' the result
+# of function application of 'g'. And in the second
+# we pass function 'g' and 'x' to the function 'f'.
+
+# As an alternative you can use 'piping'
+a := x | g | f
+# it's the same as following
+b := f $ g x
+# or this
+c := f (g x)
+
+# UNFINISHED
+# Maybe we can now apply our new knowledge on some actual problem, shall we?
+# Let's calculate the sum of all the multiples of 3 or 5 below 1000.
+
+# No error handling for now
+
+head(xs: [Integer]): Integer =
+	match xs
+	| [head, ...] = head
+	| [] = unreachable
+
+tail(xs: [Integer]): [Integer] =
+	match xs
+	| [head, ... as tail] = tail
+	| [head] = []
+	| [] = unreachable
+
+multiples_of_3_or_5(xs: [Integer]): Integer =
+	is_multiple := || (== (% head xs 3) 0) (== (% head xs 5) 0) 
+	add_if_multiple :=
+		match is_multiple
+		| True  = + (head xs) (multiples_of_3_or_5 $ tail xs)
+		| False = multiples_of_3_or_5 $ tail xs
+	match 'xs
+	| 0 = 0
+	| _ = add_if_multiple

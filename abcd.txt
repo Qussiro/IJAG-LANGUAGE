@@ -1,14 +1,11 @@
-a = 32
-b = 12
-sum = a + b
+a := 32
+b := 12
+sum := + a b
 
-print(sum)
+print sum
 
-d = 1
-print(d)
+d := 8
+print d
 
-c = 11
-ddd = 58
-cdsum = c + ddd
-
-print(cdsum)
+ddd := - - + + b / * 3 2 2 2 2 d
+print ddd

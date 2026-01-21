@@ -413,8 +413,7 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, ast: ^A
                 unreachable()
             }
         case PushVal:
-            num := generate_expr_asm(buffer, ast.variables[inst][:], ast)
-            nums_count += 1 + num
+            nums_count += generate_expr_asm(buffer, ast.variables[inst][:], ast)
         }
     }
     return nums_count
@@ -476,6 +475,7 @@ generate_asm :: proc(ast: ^AST) {
     
     for f, i in ast.func_calls {
         nums_count := generate_expr_asm(&buffer, f.expr[:], ast)
+        assert(nums_count == 1)
         
         fmt.sbprintf(&buffer, "        mov rax, [rsp]\n")
         fmt.sbprintf(&buffer, "        call print\n")

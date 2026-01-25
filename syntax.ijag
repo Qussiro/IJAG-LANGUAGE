@@ -203,3 +203,29 @@ nthFib(n: Integer): Integer =
 	| 0 = 0
 	| 1 = 1
 	| _ = + (nthFib - n 1) (nthFib - n 2)
+
+# Functions types and Anonymous functions
+
+f(word: String): Integer = 'word
+_ = typeof f
+# (String): Integer
+
+map(list: List $M, f: ($M): $T): List $T =
+	match list
+	| []                  = []
+	| [head, ... as tail] = ++ f head map tail
+
+_ = map ["Rust", "Scala"] f
+# [4, 5]
+
+remove(string: String, target: Char): String =
+	match string
+	| []                  = []
+	| [head, ... as tail] =
+		match head
+		| target = remove tail target substitute
+		| _ = ++ head remove tail target substitute
+
+_ = map ["Rust", "Scala"] (word) := '(remove word 'a')
+# [4, 3]
+

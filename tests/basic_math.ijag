@@ -8,4 +8,5 @@ d := 8
 print d
 
 ddd := - - + + b / * 3 2 2 2 2 d
+ddd1 := * 3 2 | / _ 2 | + b _ | + _ 2 | - _ 2 | - _ d 
 print ddd

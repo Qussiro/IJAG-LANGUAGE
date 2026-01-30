@@ -1,5 +1,0 @@
-a = [69..420]
-
-b = a'
-
-(imprimendi $ a b a')

@@ -7,14 +7,11 @@
 # Invlaid: 2n
 
 # Number Types (math-like)
-t1 := Natural     # [1, 2, 3, ...]
-t2 := Whole       # [0, Natural]
-t3 := Integer     # [... -2, -1, Whole]
-t4 := Rational    # Integer / Natural
-t5 := Irrational  # 
-t6 := Real        # [Rational, Irrational]
-t7 := Imaginary   # sqrt(-1)
-t8 := Complex     # [Real, Imaginary]
+t1 := Natural   # [0, 1, 2, ...]
+t2 := Integer   # [... -2, -1, Natural]
+t3 := Rational  # Integer / Natural
+t4 := Real      #
+t5 := Complex   #
 
 # You can specify size of number type with suffix
 t1 := Integer8
@@ -33,7 +30,7 @@ s1 := "Hello"
 s2 := ['H', 'e', 'l', 'l', 'o', 0]
 # Would store its size and the 0 byte at the end
 # for C compatibility
-ss1 := s1'
+ss1 := 's1
 
 # Booleans
 b1 := True
@@ -53,10 +50,14 @@ s1 := 'l1
 # ----------------|--------
 #  Addition       | + a b
 #  Subtraction    | - a b
-#  Negation       | - a
+#  Negation*      | (- a)
 #  Multiplication | * a b
 #  Division       | / a b
 #  Remainder      | % a b
+#
+# *Negation must be explicitly wrapped with parentheses
+# because compiler can't distinguish between binary subtraction
+# and unary negation.
 
 # Functions
 # Language will have only function definitions,
@@ -140,49 +141,115 @@ sum1 := + 1 2
 sum2 := add 1 2
 
 # If you have deeply nested function applications
-a := f (g (h x))
-# you can use $ syntax for convenience.
-b := f $ g $ h x
-
-# Note that this
-a := f $ g x
-# and this
-b := f g x
-# is not the same.
-# In first example we pass to function 'f' the result
-# of function application of 'g'. And in the second
-# we pass function 'g' and 'x' to the function 'f'.
-
-# As an alternative you can use 'piping'
+# you can use 'piping'
 a := x | g | f
 # it's the same as following
-b := f $ g x
-# or this
-c := f (g x)
+b := f g x
 
-# UNFINISHED
+# User types
+
+Vec2 : Type = record (
+	x: Real,
+	y: Real,
+)
+
+Vec2(T: Type) := record (
+	x: T,
+	y: T,
+)
+
 # Maybe we can now apply our new knowledge on some actual problem, shall we?
 # Let's calculate the sum of all the multiples of 3 or 5 below 1000.
 
-# No error handling for now
-
-head(xs: [Integer]): Integer =
+head(xs: List $T): $T =
 	match xs
 	| [head, ...] = head
-	| [] = unreachable
+	# There must be some type of compile-time or run-time check 
+	# | [] = unreachable
 
-tail(xs: [Integer]): [Integer] =
+tail(xs: List $T): List $T =
 	match xs
 	| [head, ... as tail] = tail
-	| [head] = []
-	| [] = unreachable
+	| [_] = []
+	# There must be some type of compile-time or run-time check 
+	# | [] = unreachable
 
-multiples_of_3_or_5(xs: [Integer]): Integer =
+multiples_of_3_or_5(xs: List Integer): Integer =
 	is_multiple := || (== (% head xs 3) 0) (== (% head xs 5) 0) 
 	add_if_multiple :=
-		match is_multiple
-		| True  = + (head xs) (multiples_of_3_or_5 $ tail xs)
-		| False = multiples_of_3_or_5 $ tail xs
+		if is_multiple
+			+ (head xs) (multiples_of_3_or_5 tail xs)
+		else
+			multiples_of_3_or_5 $ tail xs
 	match 'xs
 	| 0 = 0
 	| _ = add_if_multiple
+
+print multiples_of_3_or_5 [1..1000]
+
+# Fibonacci numbers
+
+nFibs(n: Integer): List Integer =
+	nFibsImpl(n, a, b: Integer): List Integer =
+		match n
+		| 0 = []
+		| 1 = []
+		# ++ appends element to list
+		| _ = ++ 1 (fib 2 max)
+	nFibsImpl n 0 1
+
+nthFib(n: Integer): Integer =
+	match n
+	| 0 = 0
+	| 1 = 1
+	| _ = + (nthFib - n 1) (nthFib - n 2)
+
+# Functions types and Anonymous functions
+
+f(word: String): Integer = 'word
+_ = typeof f
+# (String): Integer
+
+map(list: List $M, f: ($M): $T): List $T =
+	match list
+	| []                  = []
+	| [head, ... as tail] = ++ f head map tail
+
+_ = map ["Rust", "Scala"] f
+# [4, 5]
+
+remove(string: String, target: Char): String =
+	match string
+	| []                  = []
+	| [head, ... as tail] =
+		match head
+		| target = remove tail target substitute
+		| _ = ++ head remove tail target substitute
+
+_ = map ["Rust", "Scala"] (word) := '(remove word 'a')
+# [4, 3]
+
+# Concept of 'World' (https://clean.cs.ru.nl/download/html_report/CleanRep.2.2_4.htm#_Toc311797987)
+# or just something like 'unsafe' for interacting with OS
+
+# Inline assembly for syscalls
+# something like
+asm "xor rax, rax"
+
+# If we pass arguments through stack
+# function for syscall with 3 arguments is gonna
+# look something like this
+syscall3(number, rdi, rsi, rdx: Natural) :=
+	asm "mov rax, [rbp + 8 ]"
+	asm "mov rdi, [rbp + 16]"
+	asm "mov rsi, [rbp + 24]"
+	asm "mov rdx, [rbp + 32]"
+	asm "syscall"
+
+write(fd: Natural, buffer: String) :=
+	# write = 1, stdout = 0
+	syscall3 1 0 buffer.ptr buffer.len
+
+# Concept of Generators, for lazy evaluation of collection
+# elements
+

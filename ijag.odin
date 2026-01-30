@@ -5,7 +5,6 @@ import "core:fmt"
 import "core:strings"
 import "core:unicode"
 import "core:strconv"
-import "core:slice"
 
 Token_Id :: string
 Token_Num :: int
@@ -17,15 +16,11 @@ Token_Op :: enum {
     PRIME,
 }
 
-Sum :: struct {
-    a, b: Token_Id,
-}
-
 List :: struct {
     start, end: int
 }
 
-Func_call :: struct{
+Func_Call :: struct{
     name: string,
     expr: [dynamic]Instruction,
 }
@@ -46,9 +41,7 @@ token_id :: proc(row, column: int, id: Token_Id) -> Token {
         row,
         column,
         .ID,
-        {
-            id = id
-        }
+        { id = id },
     }
 }
 
@@ -57,9 +50,7 @@ token_num :: proc(row, column: int, num: Token_Num) -> Token {
         row,
         column,
         .NUM,
-        {
-            num = num
-        }
+        { num = num },
     }
 }
 
@@ -68,18 +59,16 @@ token_op :: proc(row, column: int, op: Token_Op) -> Token {
         row,
         column,
         .OP,
-        {
-            op = op
-        }
+        { op = op },
     }
 }
 
-token :: proc(row, column: int, type: Token_Type) -> Token {
+token_new :: proc(row, column: int, type: Token_Type) -> Token {
     return Token {
         row,
         column,
         type,
-        {}
+        {},
     }
 }
 
@@ -95,12 +84,12 @@ Token_Type :: enum {
     COL,
     EQ,
     EOL,
-    EOF
+    EOF,
 }
 
 AST :: struct {
     variables: map[string][dynamic]Instruction,
-    func_calls: [dynamic]Func_call,
+    func_calls: [dynamic]Func_Call,
 }
 
 PushNum :: int
@@ -192,13 +181,9 @@ parser_recover :: proc(parser: ^Parser, pos: int) {
 
 parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST) -> (ok: bool) {
     next := parser_next(parser)
-    if next.type == .EOL || next.type == .EOF {
-        return;
-    }
     switch next.type {
     case .ID:
         if next.as.id not_in ast.variables {
-            fmt.printf("%v", ast)
             fmt.printf("(%v:%v): Function does not exists: %#v", next.row, next.column, next.as.id)
             return
         }
@@ -232,132 +217,122 @@ parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST) -> (
         unimplemented()
     case .COL:
         unimplemented()
-    case .EOL: fallthrough
-    case .EOF:
+    case .EOL, .EOF:
         return
     }
     return true
 }
 
-op_prio :: proc(op: Token_Op) -> (prio:int) {
-    switch op {
-    case .PLUS: fallthrough
-    case .MINUS: return 1
-    case .MULTIPLY: fallthrough
-    case .DIVISON: return 2
-    case .PRIME:
-        fmt.panicf("Error <%v> in expresion", op)
-    case: 
-        unreachable()
+Lexer :: struct {
+    content: string,
+    current: int,
+    line:    int,
+    column:  int,
+    error:   bool,
+}
+
+lexer :: proc(content: string) -> Lexer {
+    return Lexer {
+        content = content,
+        current = -1,
+        line    = 1,
+        column  = 1,
+        error   = false,
     }
 }
 
-lex :: proc(file: string) -> (tokens: [dynamic]Token, ok: bool) {
-    row := 1
-    column := 1
-    for i := 0; i < len(file); {
-        for i < len(file) && unicode.is_white_space(cast(rune)file[i]) {
-            if file[i] == '\n' { 
-                row += 1
-                column = 1
-                append(&tokens, token(row, column, .EOL))
-            }
-            else {
-                column += 1
-            }
-            i += 1
-        }
-        if i >= len(file) { break }
-        if unicode.is_letter(cast(rune)file[i]) {
-            istart := i
-            for i < len(file) && unicode.is_letter(cast(rune)file[i]) {
-                i += 1
-            }
-            tid := cast(Token_Id)file[istart:i]
-            append(&tokens, token_id(row, column, tid))
-            column += i - istart
-        }
-        else if unicode.is_digit(cast(rune)file[i]) {
-            istart := i
-            for i < len(file) && unicode.is_digit(cast(rune)file[i]) {
-                i += 1
-            }
-            num, ok := strconv.parse_int(cast(string)file[istart:i])
-            if !ok {
-                fmt.printf("(%v:%v): Invalid number", row, column)
-                return
-            }
-            tnum := cast(Token_Num)num
-            append(&tokens, token_num(row, column, tnum))
-            column += i - istart
-        }
-        else if file[i] == '=' {
-            append(&tokens, token(row, column, .EQ))
-            i += 1
-            column += 1
-        }
-        else if file[i] == '(' {
-            append(&tokens, token(row, column, .LPAR))
-            i += 1
-            column += 1
-        }
-        else if file[i] == ')' {
-            append(&tokens, token(row, column, .RPAR))
-            i += 1
-            column += 1
-        }
-        else if file[i] == '[' {
-            append(&tokens, token(row, column, .LSQPAR))
-            i += 1
-            column += 1
-        }
-        else if file[i] == ']' {
-            append(&tokens, token(row, column, .RSQPAR))
-            i += 1
-            column += 1
-        }
-        else if file[i] == '*' {
-            append(&tokens, token_op(row, column, .MULTIPLY))
-            i += 1
-            column += 1
-        }
-        else if file[i] == '+' {
-            append(&tokens, token_op(row, column, .PLUS))
-            i += 1
-            column += 1
-        }
-        else if file[i] == '-' {
-            append(&tokens, token_op(row, column, .MINUS))
-            i += 1
-            column += 1
-        }
-        else if file[i] == '\'' {
-            append(&tokens, token_op(row, column, .PRIME))
-            i += 1
-            column += 1
-        }
-        else if file[i] == '/' {
-            append(&tokens, token_op(row, column, .DIVISON))
-            i += 1
-            column += 1
-        }
-        else if i + 1 < len(file) && strings.compare(cast(string)file[i:i+2], "..") == 0 {
-            append(&tokens, token(row, column, .DDOT))
-            i += 2
-            column += 2
-        }
-        else if file[i] == ':' {
-            append(&tokens, token(row, column, .COL))
-            i += 1
-            column += 1
-        }
-        else {
-            fmt.printf("(%v:%v): Unknown symbol: %v", row, column, cast(rune)file[i])
-            return
+lexer_next_char :: proc(lexer: ^Lexer) -> (char: rune, ok: bool) {
+    if lexer.current + 1 >= len(lexer.content) do return
+    lexer.current += 1
+    return cast(rune)lexer.content[lexer.current], true
+}
+
+lexer_peek_char :: proc(lexer: ^Lexer) -> (char: rune, ok: bool) {
+    if lexer.current + 1 >= len(lexer.content) do return
+    return cast(rune)lexer.content[lexer.current + 1], true
+}
+
+lexer_next :: proc(lexer: ^Lexer) -> (token: Token, ok: bool) {
+    for char in lexer_peek_char(lexer) {
+        if !unicode.is_white_space(char) do break
+        _ = lexer_next_char(lexer) or_else unreachable()
+        lexer.column += 1
+        if char == '\n' { 
+            token = token_new(lexer.line, lexer.column, .EOL)
+            lexer.line += 1
+            lexer.column = 1
+            return token, true
         }
     }
-    append(&tokens, token(row, column, .EOF))
-    return tokens, true
+
+    char := lexer_next_char(lexer) or_return
+    if unicode.is_letter(char) {
+        id_begin := lexer.current
+        for char in lexer_peek_char(lexer) {
+            if !unicode.is_letter(char) do break
+            _ = lexer_next_char(lexer) or_else unreachable()
+        }
+        id := lexer.content[id_begin:lexer.current + 1]
+        return token_id(lexer.line, lexer.column, id), true
+    }
+    if unicode.is_digit(char) {
+        num_begin := lexer.current
+        for char in lexer_peek_char(lexer) {
+            if !unicode.is_digit(char) do break
+            _ = lexer_next_char(lexer) or_else unreachable()
+        }
+        num_str := lexer.content[num_begin:lexer.current + 1]
+        if num, ok := strconv.parse_int(num_str); !ok {
+            fmt.printf("(%v:%v): Invalid number", lexer.line, lexer.column)
+            lexer.error = true
+            return
+        } else {
+            return token_num(lexer.line, lexer.column, num), true
+        }
+    }
+
+    switch char {
+    case '=':
+        return token_new(lexer.line, lexer.column, .EQ), true
+    case '(':
+        return token_new(lexer.line, lexer.column, .LPAR), true
+    case ')':
+        return token_new(lexer.line, lexer.column, .RPAR), true
+    case '[':
+        return token_new(lexer.line, lexer.column, .LSQPAR), true
+    case ']':
+        return token_new(lexer.line, lexer.column, .RSQPAR), true
+    case '.':
+        char := lexer_next_char(lexer) or_return
+        if char == '.' {
+            return token_new(lexer.line, lexer.column, .DDOT), true
+        }
+    case ':':
+        return token_new(lexer.line, lexer.column, .COL), true
+    case '+':
+        return token_op(lexer.line, lexer.column, .PLUS), true
+    case '-':
+        return token_op(lexer.line, lexer.column, .MINUS), true
+    case '*':
+        return token_op(lexer.line, lexer.column, .MULTIPLY), true
+    case '/':
+        return token_op(lexer.line, lexer.column, .DIVISON), true
+    case '\'':
+        return token_op(lexer.line, lexer.column, .PRIME), true
+    }
+
+    fmt.printf("(%v:%v): Unknown symbol: %v", lexer.line, lexer.column, char)
+    lexer.error = true
+    return
+}
+
+lexer_collect :: proc(lexer: ^Lexer) -> (tokens: [dynamic]Token, ok: bool) {
+    for token in lexer_next(lexer) {
+        append(&tokens, token)
+    }
+    append(&tokens, token_new(lexer.line, lexer.column, .EOF))
+
+    return tokens, !lexer.error
 }
 
 parse :: proc(tokens: []Token) -> (ast: AST, ok: bool) {
@@ -375,8 +350,7 @@ parse :: proc(tokens: []Token) -> (ast: AST, ok: bool) {
         id := is_id(next) or_return
         next = parser_next(&parser)
 
-        _, ok := is_type(next, .COL, false)
-        if ok {
+        if _, ok := is_type(next, .COL, false); ok {
             next = parser_next(&parser)
             is_type(next, .EQ) or_return
 
@@ -391,7 +365,7 @@ parse :: proc(tokens: []Token) -> (ast: AST, ok: bool) {
         if strings.compare(next.as.id, "print") == 0 {
             expr: [dynamic]Instruction
             parse_expr(&parser, &expr, &ast) or_return
-            append(&ast.func_calls, Func_call{"print", expr})
+            append(&ast.func_calls, Func_Call{"print", expr})
         }
         else {
             fmt.printf("(%v:%v): Function does not exists: %#v", next.row, next.column, next.as.id)
@@ -439,8 +413,7 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, ast: ^A
                 unreachable()
             }
         case PushVal:
-            num := generate_expr_asm(buffer, ast.variables[inst][:], ast)
-            nums_count += 1 + num
+            nums_count += generate_expr_asm(buffer, ast.variables[inst][:], ast)
         }
     }
     return nums_count
@@ -502,6 +475,7 @@ generate_asm :: proc(ast: ^AST) {
     
     for f, i in ast.func_calls {
         nums_count := generate_expr_asm(&buffer, f.expr[:], ast)
+        assert(nums_count == 1)
         
         fmt.sbprintf(&buffer, "        mov rax, [rsp]\n")
         fmt.sbprintf(&buffer, "        call print\n")
@@ -536,9 +510,9 @@ run :: proc() -> (main_ok: bool) {
         return
     }
 
-    tokens := lex(cast(string)file) or_return
+    lexer := lexer(cast(string)file)
+    tokens := lexer_collect(&lexer) or_return
     ast := parse(tokens[:]) or_return
-    fmt.printf("%#v", ast)
     generate_asm(&ast)
     
     return true

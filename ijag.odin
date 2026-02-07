@@ -142,7 +142,7 @@ token_new :: proc(row, column: int, type: Token_Kind) -> Token {
 
 AST :: struct {
     functions: map[string]Func_Defenition,
-    func_calls: [dynamic]Func_Call,
+    main: [dynamic]Instruction,
 }
 
 // TODO: Create one pool for instructions and store only
@@ -165,9 +165,6 @@ Push_Arg :: Token_Id
 
 Func_Call :: struct{
     name: string,
-    // TODO: Flatten this shit, just generate instructions
-    // into body of function from which we perform call.
-    args: [dynamic][dynamic]Instruction,
 }
 
 Instruction :: union {
@@ -362,9 +359,7 @@ parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, para
         func_call: Func_Call
         func_call.name = next.as.id
         for i in 0..<len(ast.functions[next.as.id].parameters) {
-            expr: [dynamic]Instruction
-            parse_expr(parser, &expr, ast, params)
-            append(&func_call.args, expr)
+            parse_expr(parser, expr, ast, params)
         }
         append(expr, func_call)
     case .NUM:
@@ -468,12 +463,10 @@ try_parse_func_call :: proc(parser: ^Parser, ast: ^AST) -> (ok: bool) {
         return
     }
     for param in ast.functions[id.as.id].parameters {
-        expr: [dynamic]Instruction
-        parse_expr(parser, &expr, ast, {}) or_return
-        append(&func_call.args, expr)
+        parse_expr(parser, &ast.main, ast, {}) or_return
     }
     func_call.name = id.as.id
-    append(&ast.func_calls, func_call)
+    append(&ast.main, func_call)
     
     return true
 }
@@ -547,14 +540,12 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
             }
             unreachable()
         case Func_Call:
-            for arg in inst.args {
-                nums_count += generate_expr_asm(buffer, arg[:], ast.functions[inst.name].parameters[:], ast)
-            }
-            assert(nums_count >= len(inst.args))
+            params_count := len(ast.functions[inst.name].parameters)
+            assert(nums_count >= params_count)
             if strings.compare(inst.name, "print") == 0 {
                 fmt.sbprintf(buffer, "        mov rax, [rsp]\n")
                 fmt.sbprintf(buffer, "        call print\n")
-                fmt.sbprintf(buffer, "        add rsp, %v\n", 8 * len(inst.args))
+                fmt.sbprintf(buffer, "        add rsp, %v\n", 8 * params_count)
                 fmt.sbprintf(buffer, "        ; Write syscall\n")
                 fmt.sbprintf(buffer, "        mov rax, 1\n")
                 fmt.sbprintf(buffer, "        mov rdi, 1\n")
@@ -564,10 +555,11 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
             }
             else {
                 fmt.sbprintf(buffer, "        call %v\n", inst.name)
-                fmt.sbprintf(buffer, "        add rsp, %v\n", 8 * len(inst.args))
+                fmt.sbprintf(buffer, "        add rsp, %v\n", 8 * params_count)
                 fmt.sbprintf(buffer, "        push rax\n")
-                nums_count += 1 - len(inst.args)
+                nums_count += 1
             }
+            nums_count -= params_count
         }
     }
     return nums_count
@@ -637,29 +629,8 @@ generate_asm :: proc(ast: ^AST) {
     fmt.sbprintf(&buffer, "global _start\n")
     fmt.sbprintf(&buffer, "_start:\n")
     
-    for f, i in ast.func_calls {
-        nums_count: int
-        for arg in f.args {
-            nums_count += generate_expr_asm(&buffer, arg[:],ast.functions[f.name].parameters[:], ast)
-        }
-        assert(nums_count == len(f.args))
-        if strings.compare(f.name, "print") == 0 {
-            fmt.sbprintf(&buffer, "        mov rax, [rsp]\n")
-            fmt.sbprintf(&buffer, "        call print\n")
-            fmt.sbprintf(&buffer, "        add rsp, %v\n", 8 * nums_count)
-            fmt.sbprintf(&buffer, "        ; Write syscall\n")
-            fmt.sbprintf(&buffer, "        mov rax, 1\n")
-            fmt.sbprintf(&buffer, "        mov rdi, 1\n")
-            fmt.sbprintf(&buffer, "        mov rsi, newline\n")
-            fmt.sbprintf(&buffer, "        mov rdx, 1\n")
-            fmt.sbprintf(&buffer, "        syscall\n")
-        }
-        else {
-            fmt.sbprintf(&buffer, "        call %v\n", f.name)
-            fmt.sbprintf(&buffer, "        add rsp, %v\n", 8 * nums_count)
-            fmt.sbprintf(&buffer, "        push rax\n")
-        }
-    }
+    result := generate_expr_asm(&buffer, ast.main[:], {}, ast)
+    assert(result == 0)
     
     fmt.sbprintf(&buffer, "        mov rax, 0x3c\n")
     fmt.sbprintf(&buffer, "        mov rdi, 0\n")

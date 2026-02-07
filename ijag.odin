@@ -143,13 +143,18 @@ token_new :: proc(row, column: int, type: Token_Kind) -> Token {
 AST :: struct {
     functions: map[string]Func_Defenition,
     main: [dynamic]Instruction,
+    bodies: [dynamic]Instruction,
+    parameters: [dynamic]Func_Parameter,
 }
 
-// TODO: Create one pool for instructions and store only
-// slices inside of definitions. Same for parameters.
 Func_Defenition :: struct {
-    body: [dynamic]Instruction,
-    parameters: [dynamic]Func_Parameter,
+    body: Slice_Index,
+    parameters: Slice_Index,
+}
+
+Slice_Index :: struct {
+    begin: int,
+    end: int,
 }
 
 Func_Parameter :: struct {
@@ -358,7 +363,8 @@ parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, para
 
         func_call: Func_Call
         func_call.name = next.as.id
-        for i in 0..<len(ast.functions[next.as.id].parameters) {
+        call_params := ast.functions[next.as.id].parameters
+        for i in 0..<call_params.end - call_params.begin {
             parse_expr(parser, expr, ast, params)
         }
         append(expr, func_call)
@@ -401,14 +407,19 @@ try_parse_definition_parameterless :: proc(parser: ^Parser, ast: ^AST) -> (ok: b
     def : Func_Defenition
     id := parser_expect(parser, .ID) or_return
     
+    body_begin := len(ast.bodies)
+    
     if id.as.id in ast.functions do return false
     parser_expect(parser, .COL) or_return
     type := parser_expect(parser, .TYPE) or_return
     assert(type.as.type == .INTEGER)
     parser_expect(parser, .EQ) or_return
-    parse_expr(parser, &def.body, ast, {}) or_return
+    parse_expr(parser, &ast.bodies, ast, {}) or_return
+    def.body.begin = body_begin
+    def.body.end = len(ast.bodies)
     ast.functions[id.as.id] = def
-    
+
+    fmt.println(body_begin, def.body)
     return true
 }
 
@@ -418,19 +429,22 @@ try_parse_definition :: proc(parser: ^Parser, ast: ^AST) -> (ok: bool) {
     
     def : Func_Defenition
     id := parser_expect(parser, .ID) or_return
+    body_begin := len(ast.bodies)
+    params_begin := len(ast.parameters)
     
     if id.as.id in ast.functions do return false
     parser_expect(parser, .LPAR) or_return
     params: for {
         id := parser_expect(parser, .ID) or_return
-        for param in def.parameters {
+        
+        for param in ast.parameters[params_begin:] {
             if strings.compare(id.as.id, param.name) == 0 {
                 return
             }
         }
         parser_expect(parser, .COL) or_return
         type := parser_expect(parser, .TYPE) or_return
-        append(&def.parameters, Func_Parameter{id.as.id, type.as.type})
+        append(&ast.parameters, Func_Parameter{id.as.id, type.as.type})
         next := parser_next(parser) 
         #partial switch next.kind {
         case .RPAR:
@@ -446,7 +460,11 @@ try_parse_definition :: proc(parser: ^Parser, ast: ^AST) -> (ok: bool) {
     type := parser_expect(parser, .TYPE) or_return
     assert(type.as.type == .INTEGER)
     parser_expect(parser, .EQ) or_return
-    parse_expr(parser, &def.body, ast, def.parameters[:]) or_return
+    def.parameters.begin = params_begin
+    def.parameters.end = len(ast.parameters)
+    parse_expr(parser, &ast.bodies, ast, ast.parameters[def.parameters.begin:def.parameters.end]) or_return
+    def.body.begin = body_begin
+    def.body.end = len(ast.bodies)
     ast.functions[id.as.id] = def
     return true
 }
@@ -462,7 +480,8 @@ try_parse_func_call :: proc(parser: ^Parser, ast: ^AST) -> (ok: bool) {
         fmt.printf("(%v:%v): Function does not exists: %#v", id.line, id.column, id.as.id)
         return
     }
-    for param in ast.functions[id.as.id].parameters {
+    params := ast.functions[id.as.id].parameters
+    for _ in 0..<params.end - params.begin  {
         parse_expr(parser, &ast.main, ast, {}) or_return
     }
     func_call.name = id.as.id
@@ -540,7 +559,8 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
             }
             unreachable()
         case Func_Call:
-            params_count := len(ast.functions[inst.name].parameters)
+            params := ast.functions[inst.name].parameters
+            params_count := params.end - params.begin 
             assert(nums_count >= params_count)
             if strings.compare(inst.name, "print") == 0 {
                 fmt.sbprintf(buffer, "        mov rax, [rsp]\n")
@@ -618,7 +638,9 @@ generate_asm :: proc(ast: ^AST) {
         fmt.sbprintf(&buffer, "%v:\n", name)
         fmt.sbprintf(&buffer, "        push rbp\n")
         fmt.sbprintf(&buffer, "        mov rbp, rsp\n")
-        nums_count := generate_expr_asm(&buffer, def.body[:], def.parameters[:], ast)
+        body := ast.bodies[def.body.begin:def.body.end]
+        parameters := ast.parameters[def.parameters.begin:def.parameters.end]
+        nums_count := generate_expr_asm(&buffer, body, parameters, ast)
         assert(nums_count == 1)
         fmt.sbprintf(&buffer, "        pop rax\n")
         fmt.sbprintf(&buffer, "        mov rsp, rbp\n")
@@ -643,31 +665,39 @@ generate_asm :: proc(ast: ^AST) {
 nuke :: proc(ast: ^AST, content: []byte, tokens: [dynamic]Token) {
     delete(ast.main)
     delete(ast.functions)
+    delete(ast.bodies)
+    delete(ast.parameters)
     delete(content)
     delete(tokens)
 }
 
 run :: proc() -> (main_ok: bool) {
+    ast: AST
+    tokens: [dynamic]Token
+    input: []byte
+    
+    defer nuke(&ast, input, tokens)
     if len(os.args) < 2 {
         fmt.printf("Usage: ijaq <file>")
         return
-    } 
+    }
+     
     filename := os.args[1]
-    
-    input, ok := os.read_entire_file_from_filename(filename)
+    ok: bool
+    input, ok = os.read_entire_file_from_filename(filename)
     if !ok {
         fmt.printf("Couldn't open a file: %v", filename)
         return
     }
 
-    tokens := lex(string(input)) or_return
-    ast: AST
     def: Func_Defenition
-    append(&def.parameters, Func_Parameter{type = .INTEGER})   
+    tokens = lex(string(input)) or_return
+    append(&ast.parameters, Func_Parameter{type = .INTEGER})
+    def.parameters.end = 1
     ast.functions["print"] = def
-    parse(tokens[:], &ast) or_return
+    parse(tokens[:], &ast)
+    fmt.printf("%#v", ast)
     generate_asm(&ast)
-    nuke(&ast, input, tokens)
     return true
 }
 

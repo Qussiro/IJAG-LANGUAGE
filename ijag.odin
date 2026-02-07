@@ -5,31 +5,25 @@ import "core:fmt"
 import "core:strings"
 import "core:unicode"
 import "core:strconv"
-import "core:slice"
 
 Token_Id :: string
 Token_Num :: int
 Token_Op :: enum {
-    PLUS,
-    MINUS,
-    MULTIPLY,
-    DIVISON,
+    ADD,
+    SUB,
+    MUL,
+    DIV,
     PRIME,
 }
 
-List :: struct {
-    start, end: int
-}
-
-Func_Call :: struct{
-    name: string,
-    args: [dynamic][dynamic]Instruction,
-}
-
 Token :: struct {
-    row: int,
+    line: int,
     column: int,
     kind: Token_Kind,
+    // TODO: Create lists for each type of token payload
+    // and store here only index in list of corresponding
+    // type. More efficient memory usage and more cache
+    // friendly (probably).
     as: struct #raw_union {
         id: Token_Id,
         num: Token_Num,
@@ -37,6 +31,48 @@ Token :: struct {
         type: Token_Builtin_Type,
     }
 }
+
+// NOTE: Something like this
+// Test_Kind :: enum {
+//     num,
+//     str,
+//     op,
+// }
+
+// Test :: struct {
+//     kind: Test_Kind,
+//     handle: uint,
+// }
+
+// Tests :: struct {
+//     tests: [dynamic]Test,
+//     nums: [dynamic]int,
+//     strs: [dynamic]string,
+//     ops: [dynamic]u8,
+// }
+
+// test_num :: proc(tests: Tests, test: Test) -> int {
+//     assert(test.kind == .num)
+//     return tests.nums[test.handle]
+// }
+
+// test :: proc() {
+//     tests: Tests
+//     append(&tests.nums, 69)
+//     append(&tests.strs, "Hello")
+//     append(&tests.strs, "World")
+
+//     append(&tests.tests, Test {.num, 0})
+//     append(&tests.tests, Test {.str, 0})
+//     append(&tests.tests, Test {.str, 1})
+
+//     for test in tests.tests {
+//         if test.kind == .num {
+//             payload := test_num(tests, test)
+//             fmt.printfln("num: %v", payload)
+//         }
+//     }
+// }
 
 Token_Kind :: enum {
     ID,
@@ -109,9 +145,11 @@ AST :: struct {
     func_calls: [dynamic]Func_Call,
 }
 
+// TODO: Create one pool for instructions and store only
+// slices inside of definitions. Same for parameters.
 Func_Defenition :: struct {
     body: [dynamic]Instruction,
-    parameters: [dynamic]Func_Parameter, 
+    parameters: [dynamic]Func_Parameter,
 }
 
 Func_Parameter :: struct {
@@ -120,138 +158,23 @@ Func_Parameter :: struct {
 }
 
 Push_Num :: int
+
 Push_Op :: Token_Op
+
 Push_Arg :: Token_Id
+
+Func_Call :: struct{
+    name: string,
+    // TODO: Flatten this shit, just generate instructions
+    // into body of function from which we perform call.
+    args: [dynamic][dynamic]Instruction,
+}
 
 Instruction :: union {
     Push_Num,
     Push_Op,
     Push_Arg,
     Func_Call
-}
-
-Parser :: struct {
-    tokens: []Token,
-    current: int
-}
-
-parser_init :: proc(tokens: []Token) -> Parser {
-    return Parser{tokens, -1}
-}
-
-parser_next :: proc(parser: ^Parser) -> Token {
-    if parser.current < len(parser.tokens)-1 {
-        parser.current += 1
-    }
-    return parser.tokens[parser.current]
-}
-
-parser_peek :: proc(parser: ^Parser) -> Token {
-    if parser.current < len(parser.tokens)-1 {
-        return parser.tokens[parser.current+1]
-    }
-    return parser.tokens[parser.current]
-}
-
-is_type :: proc(token: Token, type: Token_Kind, log := true) -> (result: Token, ok: bool) {
-    if token.kind == .EOF {
-        if log {
-            fmt.printf("(%v:%v): Expected <%v> but found nothing", token.row, token.column, type)
-        }
-        return
-    }
-    if token.kind != type { 
-        if log {
-            fmt.printf("(%v:%v): Expected <%v> but found: %v", token.row, token.column, type, token.kind)
-        }
-        return
-    }
-    return token, true
-}
-
-is_id :: proc(token: Token) -> (result: Token_Id, ok: bool) {
-    token := is_type(token, .ID) or_return
-    return token.as.id, true
-}
-
-is_op :: proc(token: Token) -> (result: Token_Op, ok: bool) {
-    token := is_type(token, .OP) or_return
-    return token.as.op, true
-}
-
-is_num :: proc(token: Token) -> (result: Token_Num, ok: bool) {
-    token := is_type(token, .NUM) or_return
-    return token.as.num, true
-}
-
-is_exact_id :: proc(token: Token, expected: Token_Id) -> (ok: bool) {
-    token := is_type(token, .ID) or_return
-    return token.as.id == expected
-}
-
-is_exact_op :: proc(token: Token, expected: Token_Op) -> (ok: bool) {
-    token := is_type(token, .OP) or_return
-    return token.as.op == expected
-}
-
-is_exact_num :: proc(token: Token, expected: Token_Num) -> (ok: bool) {
-    token := is_type(token, .NUM) or_return
-    return token.as.num == expected
-}
-
-parser_save :: proc(parser: Parser) -> int {
-    return parser.current
-}
-
-parser_recover :: proc(parser: ^Parser, pos: int) {
-    parser.current = pos
-}
-
-parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, params: []Func_Parameter) -> (ok: bool) {
-    next := parser_next(parser)
-    #partial switch next.kind {
-    case .ID:
-        for param in params {
-            if strings.compare(param.name, next.as.id) == 0 {
-                append(expr, next.as.id)
-                return true
-            }
-        }
-        if next.as.id not_in ast.functions {
-            fmt.printf("(%v:%v): Function does not exists: %#v", next.row, next.column, next.as.id)
-            return
-        }
-
-        func_call: Func_Call
-        func_call.name = next.as.id
-        for i in 0..<len(ast.functions[next.as.id].parameters) {
-            expr: [dynamic]Instruction
-            parse_expr(parser, &expr, ast, params)
-            append(&func_call.args, expr)
-        }
-        append(expr, func_call)
-    case .NUM:
-        append(expr, next.as.num)
-    case .OP:
-        switch next.as.op {
-        case .PLUS: fallthrough
-        case .MINUS: fallthrough
-        case .MULTIPLY: fallthrough
-        case .DIVISON:
-            parse_expr(parser, expr, ast, params) or_return
-            parse_expr(parser, expr, ast, params) or_return
-            append(expr, next.as.op)
-        case .PRIME:
-            parse_expr(parser, expr, ast, params) or_return
-            append(expr, next.as.op)
-        }
-    case .EOL, .EOF:
-        return
-    case:          
-        unimplemented()
-    }
-    
-    return true
 }
 
 Lexer :: struct {
@@ -262,7 +185,7 @@ Lexer :: struct {
     error:   bool,
 }
 
-lexer :: proc(content: string) -> Lexer {
+lexer_init :: proc(content: string) -> Lexer {
     return Lexer {
         content = content,
         current = -1,
@@ -309,6 +232,7 @@ lexer_next :: proc(lexer: ^Lexer) -> (token: Token, ok: bool) {
         } 
         return token_id(lexer.line, lexer.column, id), true
     }
+
     if unicode.is_digit(char) {
         num_begin := lexer.current
         for char in lexer_peek_char(lexer) {
@@ -344,13 +268,13 @@ lexer_next :: proc(lexer: ^Lexer) -> (token: Token, ok: bool) {
     case ':':
         return token_new(lexer.line, lexer.column, .COL), true
     case '+':
-        return token_op(lexer.line, lexer.column, .PLUS), true
+        return token_op(lexer.line, lexer.column, .ADD), true
     case '-':
-        return token_op(lexer.line, lexer.column, .MINUS), true
+        return token_op(lexer.line, lexer.column, .SUB), true
     case '*':
-        return token_op(lexer.line, lexer.column, .MULTIPLY), true
+        return token_op(lexer.line, lexer.column, .MUL), true
     case '/':
-        return token_op(lexer.line, lexer.column, .DIVISON), true
+        return token_op(lexer.line, lexer.column, .DIV), true
     case '\'':
         return token_op(lexer.line, lexer.column, .PRIME), true
     case ',':
@@ -383,12 +307,96 @@ lexer_collect :: proc(lexer: ^Lexer) -> (tokens: [dynamic]Token, ok: bool) {
     return tokens, !lexer.error
 }
 
+lex :: proc(input: string) -> (tokens: [dynamic]Token, ok: bool) {
+    lexer := lexer_init(input)
+    tokens = lexer_collect(&lexer) or_return
+    return tokens, true
+}
+
+Parser :: struct {
+    tokens: []Token,
+    current: int
+}
+
+parser_init :: proc(tokens: []Token) -> Parser {
+    return Parser{tokens, -1}
+}
+
+parser_next :: proc(parser: ^Parser) -> Token {
+    if parser.current < len(parser.tokens)-1 {
+        parser.current += 1
+    }
+    return parser.tokens[parser.current]
+}
+
+parser_peek :: proc(parser: ^Parser) -> Token {
+    if parser.current < len(parser.tokens)-1 {
+        return parser.tokens[parser.current+1]
+    }
+    return parser.tokens[parser.current]
+}
+
+parser_save :: proc(parser: Parser) -> int {
+    return parser.current
+}
+
+parser_recover :: proc(parser: ^Parser, pos: int) {
+    parser.current = pos
+}
+
+parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, params: []Func_Parameter) -> (ok: bool) {
+    next := parser_next(parser)
+    #partial switch next.kind {
+    case .ID:
+        for param in params {
+            if strings.compare(param.name, next.as.id) == 0 {
+                append(expr, next.as.id)
+                return true
+            }
+        }
+        if next.as.id not_in ast.functions {
+            fmt.printf("(%v:%v): Function does not exists: %#v", next.line, next.column, next.as.id)
+            return
+        }
+
+        func_call: Func_Call
+        func_call.name = next.as.id
+        for i in 0..<len(ast.functions[next.as.id].parameters) {
+            expr: [dynamic]Instruction
+            parse_expr(parser, &expr, ast, params)
+            append(&func_call.args, expr)
+        }
+        append(expr, func_call)
+    case .NUM:
+        append(expr, next.as.num)
+    case .OP:
+        switch next.as.op {
+        case .ADD: fallthrough
+        case .SUB: fallthrough
+        case .MUL: fallthrough
+        case .DIV:
+            parse_expr(parser, expr, ast, params) or_return
+            parse_expr(parser, expr, ast, params) or_return
+            append(expr, next.as.op)
+        case .PRIME:
+            parse_expr(parser, expr, ast, params) or_return
+            append(expr, next.as.op)
+        }
+    case .EOL, .EOF:
+        return
+    case:          
+        unimplemented()
+    }
+    
+    return true
+}
+
 parser_expect :: proc(parser: ^Parser, expected: Token_Kind) -> (token: Token, ok: bool) {
     token = parser_next(parser)
     if token.kind != expected {
         return
     }
-    return token, true    
+    return token, true
 }
 
 try_parse_definition_parameterless :: proc(parser: ^Parser, ast: ^AST) -> (ok: bool) {
@@ -456,7 +464,7 @@ try_parse_func_call :: proc(parser: ^Parser, ast: ^AST) -> (ok: bool) {
     id := parser_expect(parser, .ID) or_return
     
     if id.as.id not_in ast.functions {
-        fmt.printf("(%v:%v): Function does not exists: %#v", id.row, id.column, id.as.id)
+        fmt.printf("(%v:%v): Function does not exists: %#v", id.line, id.column, id.as.id)
         return
     }
     for param in ast.functions[id.as.id].parameters {
@@ -495,7 +503,7 @@ parse :: proc(tokens: []Token, ast: ^AST) -> (ok: bool) {
 generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params: []Func_Parameter, ast: ^AST) -> int {
     nums_count := 0
     for inst in expr {
-        switch inst in inst{
+        sw: switch inst in inst {
         case Push_Num:
             nums_count += 1
             fmt.sbprintf(buffer, "        push qword %v\n", inst)
@@ -507,19 +515,19 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
             fmt.sbprintf(buffer, "        pop rax\n")
             
             switch inst {
-            case .PLUS:
+            case .ADD:
                 fmt.sbprintf(buffer, "        add rax, rbx\n")
                 fmt.sbprintf(buffer, "        push rax\n")
                 nums_count += 1
-            case .MINUS: 
+            case .SUB: 
                 fmt.sbprintf(buffer, "        sub rax, rbx\n")
                 fmt.sbprintf(buffer, "        push rax\n")
                 nums_count += 1
-            case .MULTIPLY: 
+            case .MUL: 
                 fmt.sbprintf(buffer, "        imul rbx\n")
                 fmt.sbprintf(buffer, "        push rax\n")
                 nums_count += 1
-            case .DIVISON:
+            case .DIV:
                 fmt.sbprintf(buffer, "        idiv rbx\n")
                 fmt.sbprintf(buffer, "        push rax\n")
                 nums_count += 1
@@ -534,9 +542,10 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
                 if strings.compare(param.name, inst) == 0 {
                     fmt.sbprintf(buffer, "        push qword [rbp + %v]\n", (len(params) - i + 1)*8)
                     nums_count += 1
-                    break
+                    break sw
                 }
             }
+            unreachable()
         case Func_Call:
             for arg in inst.args {
                 nums_count += generate_expr_asm(buffer, arg[:], ast.functions[inst.name].parameters[:], ast)
@@ -572,12 +581,7 @@ generate_asm :: proc(ast: ^AST) {
     }
     
     buffer: strings.Builder
-    fmt.sbprintf(&buffer, "global _start\n")
     fmt.sbprintf(&buffer, "section .data\n")
-    fmt.sbprintf(&buffer, "buffer db 32\n")
-    fmt.sbprintf(&buffer, "lsqpar db '['\n")
-    fmt.sbprintf(&buffer, "rsqpar db ']'\n")
-    fmt.sbprintf(&buffer, "commaspace db ', '\n")
     fmt.sbprintf(&buffer, "newline db 10\n")
     fmt.sbprintf(&buffer, "section .text\n")
     fmt.sbprintf(&buffer, "print:\n")
@@ -630,6 +634,7 @@ generate_asm :: proc(ast: ^AST) {
         fmt.sbprintf(&buffer, "        ret\n")
     }
     
+    fmt.sbprintf(&buffer, "global _start\n")
     fmt.sbprintf(&buffer, "_start:\n")
     
     for f, i in ast.func_calls {
@@ -671,14 +676,13 @@ run :: proc() -> (main_ok: bool) {
     } 
     filename := os.args[1]
     
-    file, ok := os.read_entire_file_from_filename(filename)
+    input, ok := os.read_entire_file_from_filename(filename)
     if !ok {
         fmt.printf("Couldn't open a file: %v", filename)
         return
     }
 
-    lexer := lexer(cast(string)file)
-    tokens := lexer_collect(&lexer) or_return
+    tokens := lex(string(input)) or_return
     ast: AST
     def: Func_Defenition
     append(&def.parameters, Func_Parameter{type = .INTEGER})   

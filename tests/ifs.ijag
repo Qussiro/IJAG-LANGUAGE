@@ -1,0 +1,6 @@
+a : Integer = 1
+b : Integer = 2
+
+if != a b { printstr "NEQ!" } 
+
+if == a b { printstr "EQL!" } 

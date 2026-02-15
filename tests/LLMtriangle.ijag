@@ -1,0 +1,18 @@
+#Code kinda works 
+printStars(n: Integer): Integer {
+	if == n 0 { 0 }
+	else {
+		printstr "*"
+		printStars - n 1
+	}
+}
+
+triangle(current: Integer, remaining: Integer): Integer {
+	if == remaining 0 { 0 }
+	else {
+		printStars current
+		triangle + current 1 - remaining 1
+	}
+}
+
+triangle 1 5

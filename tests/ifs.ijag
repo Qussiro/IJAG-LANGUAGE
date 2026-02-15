@@ -1,6 +1,30 @@
-a : Integer = 1
-b : Integer = 2
+a : Integer { 1 }
+b : Integer { 2 }
 
-if != a b { printstr "NEQ!" } 
+if != a b { 
+	print 123
+	printstr "NEQ!" 
+	printstr "=)"
+	printstr " "
+} 
 
-if == a b { printstr "EQL!" } 
+if != a b { 
+	printstr "EQL1!" 
+} else {
+	printstr "NEQ2!"
+}
+printstr " "
+
+if != a b {
+	if != a b {
+		printstr "aaaa!"
+	}
+}
+printstr " "
+
+fact(i: Integer): Integer {
+	if == i 1 { 1 } 
+	else { * i fact - i 1 }
+}
+print fact 5
+

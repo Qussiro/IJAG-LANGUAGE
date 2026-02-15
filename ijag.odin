@@ -103,6 +103,7 @@ Token_Builtin_Type :: enum {
     INTEGER,
     BOOLEAN,
     STRING,
+    VOID,
 }
 
 token_builtin_type :: proc(row, column: int, type: Token_Builtin_Type) -> Token {
@@ -160,14 +161,21 @@ token_str :: proc(row, column: int, str: string) -> Token {
 }
 
 AST :: struct {
-    functions: map[string]Func_Defenition,
+    functions: map[string]Func_Def,
     main: [dynamic]Instruction,
     bodies: [dynamic]Instruction,
     parameters: [dynamic]Func_Parameter,
     strs: [dynamic]string,
 }
 
-Func_Defenition :: struct {
+Func_Decl :: struct {
+    id: Token_Id,
+    parameters: []Func_Parameter,
+    line:    int,
+    column:  int,
+}
+
+Func_Def :: struct {
     body: Slice_Index,
     parameters: Slice_Index,
 }
@@ -185,13 +193,22 @@ Func_Parameter :: struct {
 Push_Num :: int
 Push_Op :: Token_Op
 Push_Arg :: Token_Id
-Push_Str :: distinct int
 Func_Call :: struct{
     name: string,
 }
+Push_Str :: struct {
+    id: int
+}
 
-Con_Jump :: distinct int
-Label :: distinct int
+Con_Jump :: struct {
+    label: int
+}
+Jump :: struct {
+    label: int
+}
+Label :: struct {
+    label: int
+}
 
 Instruction :: union {
     Push_Num,
@@ -199,6 +216,7 @@ Instruction :: union {
     Push_Arg,
     Push_Str,
     Func_Call,
+    Jump,
     Con_Jump,
     Label,
 }
@@ -398,6 +416,72 @@ parser_recover :: proc(parser: ^Parser, pos: int) {
     parser.current = pos
 }
 
+parse_declaration :: proc(parser: ^Parser) -> (decl: Func_Decl, ok: bool){
+    @(static) params: [dynamic]Func_Parameter
+    clear(&params)
+    id := parser_expect(parser, .ID) or_return
+    decl.id = id.as.id
+    decl.line = id.line
+    decl.column = id.column
+    
+    if strings.compare(id.as.id, "if") == 0 || strings.compare(id.as.id, "else") == 0 {
+        return
+    }
+    
+    next := parser_next(parser)
+    #partial switch next.kind {
+    case .LPAR:
+        loop: for {
+            id := parser_expect(parser, .ID) or_return
+            
+            for param in params {
+                if strings.compare(id.as.id, param.name) == 0 {
+                    return
+                }
+            }
+            parser_expect(parser, .COL) or_return
+            type := parser_expect(parser, .TYPE) or_return
+            append(&params, Func_Parameter{id.as.id, type.as.type})
+            next := parser_next(parser) 
+            #partial switch next.kind {
+            case .RPAR:
+                break loop
+            case .COMMA:
+                continue loop
+            case:
+                return
+            }
+        }
+        parser_expect(parser, .COL) or_return
+        fallthrough
+    case .COL:
+        type := parser_expect(parser, .TYPE) or_return
+        assert(type.as.type == .INTEGER)
+    case:
+        return
+    }
+    decl.parameters = params[:]
+    return decl, true
+}
+
+parse_declarations :: proc(parser: ^Parser, ast: ^AST) -> (ok: bool) {
+    for parser_peek(parser).kind != .EOF {
+        if parser_peek(parser).kind != .ID {
+            parser_next(parser)
+            continue
+        }
+        decl := parse_declaration(parser) or_continue
+        if decl.id in ast.functions {
+            fmt.printf("(%v:%v): Function is already declared: %#v", decl.line, decl.column, decl.id)
+            return 
+        }
+        param_begin := len(ast.parameters)
+        append(&ast.parameters, ..decl.parameters)
+        ast.functions[decl.id] = Func_Def{parameters = {param_begin, len(ast.parameters)}}
+    }
+    return true
+}
+
 parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, params: []Func_Parameter) -> (ok: bool) {
     @(static) label_count := 0
     next := parser_next(parser)
@@ -405,11 +489,22 @@ parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, para
     case .ID:
         if strings.compare(next.as.id, "if") == 0 {
             parse_expr(parser, expr, ast, params) or_return
-            append(expr, Con_Jump(label_count))
-            parser_expect(parser, .LCPAR) or_return
+            append(expr, Con_Jump{label_count})
             parse_expr(parser, expr, ast, params) or_return
-            parser_expect(parser, .RCPAR) or_return
-            append(expr, Label(label_count))
+            exprlen := len(expr)
+            append(expr, Label{label_count})
+            label_count += 1
+            if parser_peek(parser).kind == .EOL {
+                parser_next(parser)
+            }
+            if parser_peek(parser).kind == .ID {
+                if strings.compare(parser_peek(parser).as.id, "else") == 0 {
+                    parser_next(parser)
+                    parse_expr(parser, expr, ast, params) or_return
+                    inject_at(expr, exprlen, Jump{label_count})
+                    append(expr, Label{label_count})
+                }
+            }
             label_count += 1
             return true
         }
@@ -428,7 +523,7 @@ parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, para
         func_call.name = next.as.id
         call_params := ast.functions[next.as.id].parameters
         for i in 0..<call_params.end - call_params.begin {
-            parse_expr(parser, expr, ast, params)
+            parse_expr(parser, expr, ast, params) or_return
         }
         append(expr, func_call)
     case .NUM:
@@ -449,11 +544,21 @@ parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, para
             append(expr, next.as.op)
         }
     case .STR:
-        append(expr, Push_Str(len(ast.strs)))
+        append(expr, Push_Str{len(ast.strs)})
         append(&ast.strs, next.as.str)
+    case .LCPAR:
+        for {
+            fmt.println(parser_peek(parser))
+            if parser_peek(parser).kind == .RCPAR {
+                parser_next(parser)
+                break
+            }
+            parse_expr(parser, expr, ast, params)
+        }
     case .EOL, .EOF:
         return
-    case:          
+    case:
+        fmt.println(next.kind)      
         unimplemented()
     }
     
@@ -468,74 +573,6 @@ parser_expect :: proc(parser: ^Parser, expected: Token_Kind) -> (token: Token, o
     return token, true
 }
 
-try_parse_definition_parameterless :: proc(parser: ^Parser, ast: ^AST) -> (ok: bool) {
-    save := parser_save(parser^)
-    defer if !ok do parser_recover(parser, save)
-    
-    def : Func_Defenition
-    id := parser_expect(parser, .ID) or_return
-    
-    body_begin := len(ast.bodies)
-    
-    if id.as.id in ast.functions do return false
-    parser_expect(parser, .COL) or_return
-    type := parser_expect(parser, .TYPE) or_return
-    assert(type.as.type == .INTEGER)
-    parser_expect(parser, .EQ) or_return
-    parse_expr(parser, &ast.bodies, ast, {}) or_return
-    def.body.begin = body_begin
-    def.body.end = len(ast.bodies)
-    ast.functions[id.as.id] = def
-
-    return true
-}
-
-try_parse_definition :: proc(parser: ^Parser, ast: ^AST) -> (ok: bool) {
-    save := parser_save(parser^)
-    defer if !ok do parser_recover(parser, save)
-    
-    def : Func_Defenition
-    id := parser_expect(parser, .ID) or_return
-    body_begin := len(ast.bodies)
-    params_begin := len(ast.parameters)
-    
-    if id.as.id in ast.functions do return false
-    parser_expect(parser, .LPAR) or_return
-    params: for {
-        id := parser_expect(parser, .ID) or_return
-        
-        for param in ast.parameters[params_begin:] {
-            if strings.compare(id.as.id, param.name) == 0 {
-                return
-            }
-        }
-        parser_expect(parser, .COL) or_return
-        type := parser_expect(parser, .TYPE) or_return
-        append(&ast.parameters, Func_Parameter{id.as.id, type.as.type})
-        next := parser_next(parser) 
-        #partial switch next.kind {
-        case .RPAR:
-            break params
-        case .COMMA:
-            continue params
-        case:
-            return
-        }
-    }
-    
-    parser_expect(parser, .COL) or_return
-    type := parser_expect(parser, .TYPE) or_return
-    assert(type.as.type == .INTEGER)
-    parser_expect(parser, .EQ) or_return
-    def.parameters.begin = params_begin
-    def.parameters.end = len(ast.parameters)
-    parse_expr(parser, &ast.bodies, ast, ast.parameters[def.parameters.begin:def.parameters.end]) or_return
-    def.body.begin = body_begin
-    def.body.end = len(ast.bodies)
-    ast.functions[id.as.id] = def
-    return true
-}
-
 parse :: proc(tokens: []Token, ast: ^AST) -> (ok: bool) {
     parser := parser_init(tokens)
     
@@ -548,9 +585,15 @@ parse :: proc(tokens: []Token, ast: ^AST) -> (ok: bool) {
             parser_next(&parser)
             continue
         }
-
-        if try_parse_definition_parameterless(&parser, ast) do continue
-        if try_parse_definition(&parser, ast) do continue
+        save := parser_save(parser)
+        if decl, ok := parse_declaration(&parser); ok {
+            body_begin := len(ast.bodies)
+            def := &ast.functions[decl.id]
+            parse_expr(&parser, &ast.bodies, ast, ast.parameters[def.parameters.begin:def.parameters.end]) or_return
+            def.body = {body_begin, len(ast.bodies)} 
+            continue
+        }
+        parser_recover(&parser, save)
         if parse_expr(&parser, &ast.main, ast, {}) do continue
 
         return
@@ -558,52 +601,132 @@ parse :: proc(tokens: []Token, ast: ^AST) -> (ok: bool) {
     return true
 }
 
-generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params: []Func_Parameter, ast: ^AST, type_stack: ^[dynamic]Token_Builtin_Type) {
-    @(static) str_count := 0
-    for inst in expr {
-        sw: switch inst in inst {
+type_check :: proc(instructions: []Instruction, params: []Func_Parameter, ast: ^AST, type_stack: ^[dynamic]Token_Builtin_Type) -> Token_Builtin_Type {
+    loop: for i := 0; i < len(instructions); i += 1 {
+        sw: switch v in instructions[i] {
         case Push_Num:
             append(type_stack, Token_Builtin_Type.INTEGER)
-            fmt.sbprintf(buffer, "        push qword %v\n", inst)
         case Push_Op:
             assert(pop(type_stack) == .INTEGER)
             assert(pop(type_stack) == .INTEGER)
+            switch v {
+            case .ADD:
+                append(type_stack, Token_Builtin_Type.INTEGER)
+            case .SUB: 
+                append(type_stack, Token_Builtin_Type.INTEGER)
+            case .MUL: 
+                append(type_stack, Token_Builtin_Type.INTEGER)
+            case .DIV:
+                append(type_stack, Token_Builtin_Type.INTEGER)
+            case .EQL:
+                append(type_stack, Token_Builtin_Type.BOOLEAN)
+            case .NEQ:
+                append(type_stack, Token_Builtin_Type.BOOLEAN)
+            case .PRIME: 
+                unimplemented()
+            case: 
+                unreachable()
+            }
+        case Push_Arg:
+            for param, i in params {
+                if strings.compare(param.name, v) == 0 {
+                    append(type_stack, param.type)
+                    break sw
+                }
+            }
+            unreachable()
+        case Func_Call:
+            params := ast.functions[v.name].parameters
+            params_count := params.end - params.begin
+            #reverse for param in ast.parameters[params.begin:params.end] {
+                fmt.println(v.name, type_stack)
+                assert(pop(type_stack) == param.type)
+            }
+            if strings.compare(v.name, "print") != 0 && strings.compare(v.name, "printstr") != 0 {
+                append(type_stack, Token_Builtin_Type.INTEGER)
+            }
+        case Jump:
+            for v1, j in instructions[i+1:] {
+                if label, ok := v1.(Label); ok {
+                    if label.label == v.label {
+                        i += j + 1
+                        break
+                    }
+                }
+            }
+        case Con_Jump:
+            assert(pop(type_stack) == .BOOLEAN)
+            else_branch: Token_Builtin_Type
+            type_stack_saved: [dynamic]Token_Builtin_Type
+            defer delete(type_stack_saved)
+            append(&type_stack_saved, ..type_stack[:])
             
+            for v1, j in instructions[i+1:] {
+                if label, ok := v1.(Label); ok {
+                    if label.label == v.label {
+                        else_branch = type_check(instructions[i+j+2:], params, ast, &type_stack_saved)
+                        break
+                    }
+                }
+            }
+            
+            clear(&type_stack_saved)
+            append(&type_stack_saved, ..type_stack[:])
+            if_branch := type_check(instructions[i+1:], params, ast, &type_stack_saved)
+            assert(if_branch == else_branch)
+            clear(type_stack)
+            if if_branch == .VOID do continue
+            append(type_stack, if_branch)
+            break loop
+        case Label:
+        case Push_Str:
+            append(type_stack, Token_Builtin_Type.STRING)
+        }
+    }
+    fmt.println(type_stack)
+    assert(len(type_stack) <= 1)
+    if len(type_stack) == 0 do return .VOID
+    return type_stack[0]
+}
+
+generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params: []Func_Parameter, ast: ^AST) {
+    @(static) str_count := 0
+    @(static) type_stack: [dynamic]Token_Builtin_Type
+    clear(&type_stack)
+
+    type_check(expr, params, ast, &type_stack)
+    for inst, i in expr {
+        sw: switch inst in inst {
+        case Push_Num:
+            fmt.sbprintf(buffer, "        push qword %v\n", inst)
+        case Push_Op:
             fmt.sbprintf(buffer, "        pop rbx\n")
             fmt.sbprintf(buffer, "        pop rax\n")
-            
             switch inst {
             case .ADD:
                 fmt.sbprintf(buffer, "        add rax, rbx\n")
                 fmt.sbprintf(buffer, "        push rax\n")
-                append(type_stack, Token_Builtin_Type.INTEGER)
             case .SUB: 
                 fmt.sbprintf(buffer, "        sub rax, rbx\n")
                 fmt.sbprintf(buffer, "        push rax\n")
-                append(type_stack, Token_Builtin_Type.INTEGER)
             case .MUL: 
                 fmt.sbprintf(buffer, "        imul rbx\n")
                 fmt.sbprintf(buffer, "        push rax\n")
-                append(type_stack, Token_Builtin_Type.INTEGER)
             case .DIV:
                 fmt.sbprintf(buffer, "        idiv rbx\n")
                 fmt.sbprintf(buffer, "        push rax\n")
-                append(type_stack, Token_Builtin_Type.INTEGER)
             case .EQL:
                 fmt.sbprintf(buffer, "        mov rdx, 0\n")
                 fmt.sbprintf(buffer, "        mov rcx, 1\n")
                 fmt.sbprintf(buffer, "        cmp rax, rbx\n")
                 fmt.sbprintf(buffer, "        cmove rdx, rcx\n")
                 fmt.sbprintf(buffer, "        push rdx\n")
-                append(type_stack, Token_Builtin_Type.BOOLEAN)
             case .NEQ:
                 fmt.sbprintf(buffer, "        mov rdx, 1\n")
                 fmt.sbprintf(buffer, "        mov rcx, 0\n")
                 fmt.sbprintf(buffer, "        cmp rax, rbx\n")
                 fmt.sbprintf(buffer, "        cmove rdx, rcx\n")
                 fmt.sbprintf(buffer, "        push rdx\n")
-                append(type_stack, Token_Builtin_Type.BOOLEAN)
-
             case .PRIME: 
                 unimplemented()
             case: 
@@ -613,7 +736,6 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
             for param, i in params {
                 if strings.compare(param.name, inst) == 0 {
                     fmt.sbprintf(buffer, "        push qword [rbp + %v]\n", (len(params) - i + 1)*8)
-                    append(type_stack, param.type)
                     break sw
                 }
             }
@@ -623,7 +745,6 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
             params_count := params.end - params.begin 
             byte_pop := 0
             #reverse for param in ast.parameters[params.begin:params.end] {
-                assert(pop(type_stack) == param.type)
                 switch param.type {
                 case .INTEGER:
                     byte_pop += 8
@@ -631,6 +752,8 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
                     byte_pop += 16
                 case .BOOLEAN:
                     byte_pop += 8
+                case .VOID:
+                    unreachable()
                 }
             }
             if strings.compare(inst.name, "print") == 0 {
@@ -650,21 +773,20 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
                 if strings.compare(inst.name, "printstr") != 0 {
                     // TODO: make return types, now its only numbers
                     fmt.sbprintf(buffer, "        push rax\n")
-                    append(type_stack, Token_Builtin_Type.INTEGER)
                 }
             }
+        case Jump:
+            fmt.sbprintf(buffer, "        jmp .label_%v\n", inst.label)
         case Con_Jump:
             fmt.sbprintf(buffer, "        pop rax\n")
             fmt.sbprintf(buffer, "        cmp rax, 0\n")
-            fmt.sbprintf(buffer, "        je .label_%v\n", inst)
-            assert(pop(type_stack) == .BOOLEAN)
+            fmt.sbprintf(buffer, "        je .label_%v\n", inst.label)
         case Label:
-            fmt.sbprintf(buffer, ".label_%v:\n", inst)
+            fmt.sbprintf(buffer, ".label_%v:\n", inst.label)
         case Push_Str:
             fmt.sbprintf(buffer, "        sub rsp, 16\n")
             fmt.sbprintf(buffer, "        mov qword [rsp+8], str%v\n", str_count)
-            fmt.sbprintf(buffer, "        mov qword [rsp], %v\n", len(ast.strs[inst]))
-            append(type_stack, Token_Builtin_Type.STRING)
+            fmt.sbprintf(buffer, "        mov qword [rsp], %v\n", len(ast.strs[inst.id]))
             str_count += 1
         }
     }
@@ -741,7 +863,6 @@ generate_asm :: proc(ast: ^AST) {
     fmt.sbprintf(&buffer, "        pop rbp\n")
     fmt.sbprintf(&buffer, "        ret\n")
 
-    type_stack : [dynamic]Token_Builtin_Type
     for name, def in ast.functions {
         if strings.compare(name, "print") == 0 do continue
         if strings.compare(name, "printstr") == 0 do continue
@@ -750,9 +871,7 @@ generate_asm :: proc(ast: ^AST) {
         fmt.sbprintf(&buffer, "        mov rbp, rsp\n")
         body := ast.bodies[def.body.begin:def.body.end]
         parameters := ast.parameters[def.parameters.begin:def.parameters.end]
-        generate_expr_asm(&buffer, body, parameters, ast, &type_stack)
-        assert(len(type_stack) == 1)
-        pop(&type_stack)
+        generate_expr_asm(&buffer, body, parameters, ast)
         fmt.sbprintf(&buffer, "        pop rax\n")
         fmt.sbprintf(&buffer, "        mov rsp, rbp\n")
         fmt.sbprintf(&buffer, "        pop rbp\n")
@@ -762,8 +881,7 @@ generate_asm :: proc(ast: ^AST) {
     fmt.sbprintf(&buffer, "global _start\n")
     fmt.sbprintf(&buffer, "_start:\n")
     
-    generate_expr_asm(&buffer, ast.main[:], {}, ast, &type_stack)
-    assert(len(type_stack) == 0)
+    generate_expr_asm(&buffer, ast.main[:], {}, ast)
     
     fmt.sbprintf(&buffer, "        mov rax, 0x3c\n")
     fmt.sbprintf(&buffer, "        mov rdi, 0\n")
@@ -800,9 +918,9 @@ run :: proc() -> (main_ok: bool) {
         fmt.printf("Couldn't open a file: %v", filename)
         return
     }
-
-    def: Func_Defenition
+    def: Func_Def
     tokens = lex(string(input)) or_return
+    
     append(&ast.parameters, Func_Parameter{type = .INTEGER})
     def.parameters.end = 1
     ast.functions["print"] = def
@@ -810,7 +928,11 @@ run :: proc() -> (main_ok: bool) {
     def.parameters.begin = 1
     def.parameters.end = 2
     ast.functions["printstr"] = def
-    parse(tokens[:], &ast)
+    
+    parser := parser_init(tokens[:])
+    parse_declarations(&parser, &ast) or_return
+    
+    parse(tokens[:], &ast) or_return
     fmt.printf("%#v", ast)
     generate_asm(&ast)
     return true

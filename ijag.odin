@@ -5,11 +5,11 @@ import "core:fmt"
 import "core:strings"
 import "core:unicode"
 import "core:strconv"
-import "core:slice"
 
-Token_Id :: string
-Token_Str :: string
+Token_Id  :: distinct string
+Token_Str :: distinct string
 Token_Num :: int
+
 Token_Op :: enum {
     ADD,
     SUB,
@@ -20,64 +20,12 @@ Token_Op :: enum {
     NEQ,
 }
 
-Token :: struct {
-    line: int,
-    column: int,
-    kind: Token_Kind,
-    // TODO: Create lists for each type of token payload
-    // and store here only index in list of corresponding
-    // type. More efficient memory usage and more cache
-    // friendly (probably).
-    as: struct #raw_union {
-        id: Token_Id,
-        num: Token_Num,
-        op: Token_Op,
-        str: Token_Str, 
-        type: Token_Builtin_Type,
-    }
+Token_Builtin_Type :: enum {
+    INTEGER,
+    BOOLEAN,
+    STRING,
+    VOID,
 }
-
-// NOTE: Something like this
-// Test_Kind :: enum {
-//     num,
-//     str,
-//     op,
-// }
-
-// Test :: struct {
-//     kind: Test_Kind,
-//     handle: uint,
-// }
-
-// Tests :: struct {
-//     tests: [dynamic]Test,
-//     nums: [dynamic]int,
-//     strs: [dynamic]string,
-//     ops: [dynamic]u8,
-// }
-
-// test_num :: proc(tests: Tests, test: Test) -> int {
-//     assert(test.kind == .num)
-//     return tests.nums[test.handle]
-// }
-
-// test :: proc() {
-//     tests: Tests
-//     append(&tests.nums, 69)
-//     append(&tests.strs, "Hello")
-//     append(&tests.strs, "World")
-
-//     append(&tests.tests, Test {.num, 0})
-//     append(&tests.tests, Test {.str, 0})
-//     append(&tests.tests, Test {.str, 1})
-
-//     for test in tests.tests {
-//         if test.kind == .num {
-//             payload := test_num(tests, test)
-//             fmt.printfln("num: %v", payload)
-//         }
-//     }
-// }
 
 Token_Kind :: enum {
     ID,
@@ -99,90 +47,121 @@ Token_Kind :: enum {
     STR,
 }
 
-Token_Builtin_Type :: enum {
-    INTEGER,
-    BOOLEAN,
-    STRING,
-    VOID,
+Token :: struct {
+    line   : int,
+    column : int,
+    kind   : Token_Kind,
+    handle : int,
 }
 
-token_builtin_type :: proc(row, column: int, type: Token_Builtin_Type) -> Token {
-    return Token {
-        row,
-        column,
-        .TYPE,
-        { type = type },
-    }
+Tokens :: struct {
+    list  : [dynamic]Token,
+    ids   : [dynamic]Token_Id,
+    nums  : [dynamic]Token_Num,
+    ops   : [dynamic]Token_Op,
+    strs  : [dynamic]Token_Str,
+    types : [dynamic]Token_Builtin_Type,
 }
 
-token_id :: proc(row, column: int, id: Token_Id) -> Token {
-    return Token {
-        row,
-        column,
-        .ID,
-        { id = id },
+// NOTE: Idk about that
+token_with_payload :: proc(tokens: ^Tokens, line, column: int, payload: $T) {
+    payload := payload
+    token := Token {
+        line   = line,
+        column = column,
     }
+
+    switch (typeid_of(T)) {
+    case Token_Id:
+        token.kind = .ID
+        token.handle = len(tokens.ids)
+        payload := (cast(^Token_Id)cast(^any)&payload)^
+        append(&tokens.ids, payload)
+    case Token_Str:
+        token.kind = .STR
+        token.handle = len(tokens.strs)
+        payload := (cast(^Token_Str)cast(^any)&payload)^
+        append(&tokens.strs, payload)
+    case Token_Num:
+        token.kind = .NUM
+        token.handle = len(tokens.nums)
+        payload := (cast(^Token_Num)cast(^any)&payload)^
+        append(&tokens.nums, payload)
+    case Token_Op:
+        token.kind = .OP
+        token.handle = len(tokens.ops)
+        payload := (cast(^Token_Op)cast(^any)&payload)^
+        append(&tokens.ops, payload)
+    case Token_Builtin_Type:
+        token.kind = .TYPE
+        token.handle = len(tokens.types)
+        payload := (cast(^Token_Builtin_Type)cast(^any)&payload)^
+        append(&tokens.types, payload)
+    case:
+        fmt.panicf("Unknown payload type: `%v`", typeid_of(T))
+    }
+
+    append(&tokens.list, token)
 }
 
-token_num :: proc(row, column: int, num: Token_Num) -> Token {
-    return Token {
-        row,
-        column,
-        .NUM,
-        { num = num },
+token_without_payload :: proc(tokens: ^Tokens, line, column: int, kind: Token_Kind) {
+    token := Token {
+        line   = line,
+        column = column,
+        kind   = kind,
+        handle = -1,
     }
+    append(&tokens.list, token)
 }
 
-token_op :: proc(row, column: int, op: Token_Op) -> Token {
-    return Token {
-        row,
-        column,
-        .OP,
-        { op = op },
-    }
+token_get_id :: proc(tokens: ^Tokens, token: Token) -> Token_Id {
+    assert(token.kind == .ID)
+    return tokens.ids[token.handle]
 }
 
-token_new :: proc(row, column: int, type: Token_Kind) -> Token {
-    return Token {
-        row,
-        column,
-        type,
-        {},
-    }
+token_get_type :: proc(tokens: ^Tokens, token: Token) -> Token_Builtin_Type {
+    assert(token.kind == .TYPE)
+    return tokens.types[token.handle]
 }
 
-token_str :: proc(row, column: int, str: string) -> Token {
-    return Token {
-        row,
-        column,
-        .STR,
-        {str = str},
-    }
+token_get_num :: proc(tokens: ^Tokens, token: Token) -> Token_Num {
+    assert(token.kind == .NUM)
+    return tokens.nums[token.handle]
+}
+
+token_get_op :: proc(tokens: ^Tokens, token: Token) -> Token_Op {
+    assert(token.kind == .OP)
+    return tokens.ops[token.handle]
+}
+
+token_get_str :: proc(tokens: ^Tokens, token: Token) -> Token_Str {
+    assert(token.kind == .STR)
+    return tokens.strs[token.handle]
 }
 
 AST :: struct {
-    functions: map[string]Func_Def,
-    main: [dynamic]Instruction,
-    bodies: [dynamic]Instruction,
-    parameters: [dynamic]Func_Parameter,
-    strs: [dynamic]string,
+    functions  : map[Token_Id]Func_Def,
+    main       : [dynamic]Instruction,
+    bodies     : [dynamic]Instruction,
+    parameters : [dynamic]Func_Parameter,
+    strs       : [dynamic]string,
 }
 
 Func_Decl :: struct {
-    id: Token_Id,
-    parameters: []Func_Parameter,
-    line:    int,
-    column:  int,
+    id         : Token_Id,
+    parameters : []Func_Parameter,
+    line       : int,
+    column     : int,
 }
 
 Func_Def :: struct {
-    body: Slice_Index,
-    parameters: Slice_Index,
+    body       : Slice_Index,
+    parameters : Slice_Index,
 }
 
 Slice_Index :: struct {
-    begin: int,
-    end: int,
+    begin : int,
+    end   : int,
 }
 
 Func_Parameter :: struct {
@@ -191,11 +170,13 @@ Func_Parameter :: struct {
 }
 
 Push_Num :: int
-Push_Op :: Token_Op
+Push_Op  :: Token_Op
 Push_Arg :: Token_Id
+
 Func_Call :: struct{
-    name: string,
+    name: Token_Id,
 }
+
 Push_Str :: struct {
     id: int
 }
@@ -203,9 +184,11 @@ Push_Str :: struct {
 Con_Jump :: struct {
     label: int
 }
+
 Jump :: struct {
     label: int
 }
+
 Label :: struct {
     label: int
 }
@@ -222,11 +205,11 @@ Instruction :: union {
 }
 
 Lexer :: struct {
-    content: string,
-    current: int,
-    line:    int,
-    column:  int,
-    error:   bool,
+    content : string,
+    current : int,
+    line    : int,
+    column  : int,
+    error   : bool,
 }
 
 lexer_init :: proc(content: string) -> Lexer {
@@ -250,16 +233,16 @@ lexer_peek_char :: proc(lexer: ^Lexer) -> (char: rune, ok: bool) {
     return cast(rune)lexer.content[lexer.current + 1], true
 }
 
-lexer_next :: proc(lexer: ^Lexer) -> (token: Token, ok: bool) {
+lexer_next :: proc(lexer: ^Lexer, tokens: ^Tokens) -> (ok: bool) {
     for char in lexer_peek_char(lexer) {
         if !unicode.is_white_space(char) do break
         _ = lexer_next_char(lexer) or_else unreachable()
         lexer.column += 1
         if char == '\n' { 
-            token = token_new(lexer.line, lexer.column, .EOL)
+            token_without_payload(tokens, lexer.line, lexer.column, .EOL)
             lexer.line += 1
             lexer.column = 1
-            return token, true
+            return true
         }
     }
 
@@ -272,9 +255,11 @@ lexer_next :: proc(lexer: ^Lexer) -> (token: Token, ok: bool) {
         }
         id := lexer.content[id_begin:lexer.current + 1]
         if strings.compare(id, "Integer") == 0 {
-            return token_builtin_type(lexer.line, lexer.column, .INTEGER), true
+            token_with_payload(tokens, lexer.line, lexer.column, Token_Builtin_Type.INTEGER)
+            return true
         } 
-        return token_id(lexer.line, lexer.column, id), true
+        token_with_payload(tokens, lexer.line, lexer.column, Token_Id(id))
+        return true
     }
 
     if unicode.is_digit(char) {
@@ -289,7 +274,8 @@ lexer_next :: proc(lexer: ^Lexer) -> (token: Token, ok: bool) {
             lexer.error = true
             return
         } else {
-            return token_num(lexer.line, lexer.column, num), true
+            token_with_payload(tokens, lexer.line, lexer.column, Token_Num(num))
+            return true
         }
     }
     if char == '"' {
@@ -304,7 +290,8 @@ lexer_next :: proc(lexer: ^Lexer) -> (token: Token, ok: bool) {
             return
         }
         str := lexer.content[str_begin:lexer.current]
-        return token_str(lexer.line, lexer.column, str), true
+        token_with_payload(tokens, lexer.line, lexer.column, Token_Str(str))
+        return true
     }
 
     switch char {
@@ -312,57 +299,75 @@ lexer_next :: proc(lexer: ^Lexer) -> (token: Token, ok: bool) {
         char := lexer_peek_char(lexer) or_return
         if char == '=' {
             lexer_next_char(lexer)
-            return token_op(lexer.line, lexer.column, .EQL), true
+            token_with_payload(tokens, lexer.line, lexer.column, Token_Op.EQL)
+            return true
         }
-        return token_new(lexer.line, lexer.column, .EQ), true
+        token_without_payload(tokens, lexer.line, lexer.column, .EQ)
+        return true
     case '(':
-        return token_new(lexer.line, lexer.column, .LPAR), true
+        token_without_payload(tokens, lexer.line, lexer.column, .LPAR)
+        return true
     case ')':
-        return token_new(lexer.line, lexer.column, .RPAR), true
+        token_without_payload(tokens, lexer.line, lexer.column, .RPAR)
+        return true
     case '[':
-        return token_new(lexer.line, lexer.column, .LSQPAR), true
+        token_without_payload(tokens, lexer.line, lexer.column, .LSQPAR)
+        return true
     case ']':
-        return token_new(lexer.line, lexer.column, .RSQPAR), true
+        token_without_payload(tokens, lexer.line, lexer.column, .RSQPAR)
+        return true
     case '{':
-        return token_new(lexer.line, lexer.column, .LCPAR), true
+        token_without_payload(tokens, lexer.line, lexer.column, .LCPAR)
+        return true
     case '}':
-        return token_new(lexer.line, lexer.column, .RCPAR), true
+        token_without_payload(tokens, lexer.line, lexer.column, .RCPAR)
+        return true
     case '.':
         char := lexer_next_char(lexer) or_return
         if char == '.' {
-            return token_new(lexer.line, lexer.column, .DDOT), true
+            token_without_payload(tokens, lexer.line, lexer.column, .DDOT)
+            return true
         }
     case ':':
-        return token_new(lexer.line, lexer.column, .COL), true
+        token_without_payload(tokens, lexer.line, lexer.column, .COL)
+        return true
     case '+':
-        return token_op(lexer.line, lexer.column, .ADD), true
+        token_with_payload(tokens, lexer.line, lexer.column, Token_Op.ADD)
+        return true
     case '-':
-        return token_op(lexer.line, lexer.column, .SUB), true
+        token_with_payload(tokens, lexer.line, lexer.column, Token_Op.SUB)
+        return true
     case '*':
-        return token_op(lexer.line, lexer.column, .MUL), true
+        token_with_payload(tokens, lexer.line, lexer.column, Token_Op.MUL)
+        return true
     case '/':
-        return token_op(lexer.line, lexer.column, .DIV), true
+        token_with_payload(tokens, lexer.line, lexer.column, Token_Op.DIV)
+        return true
     case '\'':
-        return token_op(lexer.line, lexer.column, .PRIME), true
+        token_with_payload(tokens, lexer.line, lexer.column, Token_Op.PRIME)
+        return true
     case ',':
-        return token_new(lexer.line, lexer.column, .COMMA), true
+        token_without_payload(tokens, lexer.line, lexer.column, .COMMA)
+        return true
     case '!':
         char := lexer_next_char(lexer) or_return
         if char == '=' {
-            return token_op(lexer.line, lexer.column, .NEQ), true
+            token_with_payload(tokens, lexer.line, lexer.column, Token_Op.NEQ)
+            return true
         }
     case '#':
         for char in lexer_peek_char(lexer) {
             _ = lexer_next_char(lexer) or_else unreachable()
             lexer.column += 1
             if char == '\n' { 
-                token = token_new(lexer.line, lexer.column, .EOL)
+                token_without_payload(tokens, lexer.line, lexer.column, .EOL)
                 lexer.line += 1
                 lexer.column = 1
-                return token, true
+                return true
             }
         }
-        return token_new(lexer.line, lexer.column, .EOF), true
+        token_without_payload(tokens, lexer.line, lexer.column, .EOF)
+        return true
     }
 
     fmt.printf("(%v:%v): Unknown symbol: %v", lexer.line, lexer.column, char)
@@ -370,42 +375,40 @@ lexer_next :: proc(lexer: ^Lexer) -> (token: Token, ok: bool) {
     return
 }
 
-lexer_collect :: proc(lexer: ^Lexer) -> (tokens: [dynamic]Token, ok: bool) {
-    for token in lexer_next(lexer) {
-        append(&tokens, token)
-    }
-    append(&tokens, token_new(lexer.line, lexer.column, .EOF))
-
-    return tokens, !lexer.error
+lexer_collect :: proc(lexer: ^Lexer, tokens: ^Tokens) -> (ok: bool) {
+    for lexer_next(lexer, tokens) { }
+    token_without_payload(tokens, lexer.line, lexer.column, .EOF)
+    return !lexer.error
 }
 
-lex :: proc(input: string) -> (tokens: [dynamic]Token, ok: bool) {
-    lexer := lexer_init(input)
-    tokens = lexer_collect(&lexer) or_return
-    return tokens, true
+lex :: proc(st: ^State) -> (ok: bool) {
+    lexer := lexer_init(cast(string)st.source)
+    lexer_collect(&lexer, &st.tokens) or_return
+    return true
 }
 
 Parser :: struct {
-    tokens: []Token,
+    tokens: ^Tokens,
     current: int
 }
 
-parser_init :: proc(tokens: []Token) -> Parser {
-    return Parser{tokens, -1}
+parser_init :: proc(tokens: ^Tokens) -> Parser {
+    return Parser {
+        tokens  = tokens,
+        current = 0,
+    }
 }
 
 parser_next :: proc(parser: ^Parser) -> Token {
-    if parser.current < len(parser.tokens)-1 {
+    token := parser.tokens.list[parser.current]
+    if parser.current < len(parser.tokens.list) {
         parser.current += 1
     }
-    return parser.tokens[parser.current]
+    return token
 }
 
 parser_peek :: proc(parser: ^Parser) -> Token {
-    if parser.current < len(parser.tokens)-1 {
-        return parser.tokens[parser.current+1]
-    }
-    return parser.tokens[parser.current]
+    return parser.tokens.list[parser.current]
 }
 
 parser_save :: proc(parser: Parser) -> int {
@@ -419,12 +422,15 @@ parser_recover :: proc(parser: ^Parser, pos: int) {
 parse_declaration :: proc(parser: ^Parser) -> (decl: Func_Decl, ok: bool){
     @(static) params: [dynamic]Func_Parameter
     clear(&params)
-    id := parser_expect(parser, .ID) or_return
-    decl.id = id.as.id
-    decl.line = id.line
-    decl.column = id.column
+
+    token_id := parser_expect(parser, .ID) or_return
+    id := token_get_id(parser.tokens, token_id)
+
+    decl.id = id
+    decl.line = token_id.line
+    decl.column = token_id.column
     
-    if strings.compare(id.as.id, "if") == 0 || strings.compare(id.as.id, "else") == 0 {
+    if strings.compare(string(id), "if") == 0 || strings.compare(string(id), "else") == 0 {
         return
     }
     
@@ -432,16 +438,20 @@ parse_declaration :: proc(parser: ^Parser) -> (decl: Func_Decl, ok: bool){
     #partial switch next.kind {
     case .LPAR:
         loop: for {
-            id := parser_expect(parser, .ID) or_return
+            token_id := parser_expect(parser, .ID) or_return
+            id := token_get_id(parser.tokens, token_id)
             
             for param in params {
-                if strings.compare(id.as.id, param.name) == 0 {
+                if strings.compare(string(id), string(param.name)) == 0 {
                     return
                 }
             }
+
             parser_expect(parser, .COL) or_return
-            type := parser_expect(parser, .TYPE) or_return
-            append(&params, Func_Parameter{id.as.id, type.as.type})
+            token_type := parser_expect(parser, .TYPE) or_return
+            type := token_get_type(parser.tokens, token_type)
+            append(&params, Func_Parameter{id, type})
+
             next := parser_next(parser) 
             #partial switch next.kind {
             case .RPAR:
@@ -455,8 +465,9 @@ parse_declaration :: proc(parser: ^Parser) -> (decl: Func_Decl, ok: bool){
         parser_expect(parser, .COL) or_return
         fallthrough
     case .COL:
-        type := parser_expect(parser, .TYPE) or_return
-        assert(type.as.type == .INTEGER)
+        token_type := parser_expect(parser, .TYPE) or_return
+        type := token_get_type(parser.tokens, token_type)
+        assert(type == .INTEGER)
     case:
         return
     }
@@ -464,20 +475,21 @@ parse_declaration :: proc(parser: ^Parser) -> (decl: Func_Decl, ok: bool){
     return decl, true
 }
 
-parse_declarations :: proc(parser: ^Parser, ast: ^AST) -> (ok: bool) {
-    for parser_peek(parser).kind != .EOF {
-        if parser_peek(parser).kind != .ID {
-            parser_next(parser)
+parse_declarations :: proc(st: ^State) -> (ok: bool) {
+    parser := parser_init(&st.tokens)
+    for parser_peek(&parser).kind != .EOF {
+        if parser_peek(&parser).kind != .ID {
+            parser_next(&parser)
             continue
         }
-        decl := parse_declaration(parser) or_continue
-        if decl.id in ast.functions {
+        decl := parse_declaration(&parser) or_continue
+        if decl.id in st.ast.functions {
             fmt.printf("(%v:%v): Function is already declared: %#v", decl.line, decl.column, decl.id)
             return 
         }
-        param_begin := len(ast.parameters)
-        append(&ast.parameters, ..decl.parameters)
-        ast.functions[decl.id] = Func_Def{parameters = {param_begin, len(ast.parameters)}}
+        param_begin := len(st.ast.parameters)
+        append(&st.ast.parameters, ..decl.parameters)
+        st.ast.functions[decl.id] = Func_Def{parameters = {param_begin, len(st.ast.parameters)}}
     }
     return true
 }
@@ -487,7 +499,8 @@ parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, para
     next := parser_next(parser)
     #partial switch next.kind {
     case .ID:
-        if strings.compare(next.as.id, "if") == 0 {
+        id := token_get_id(parser.tokens, next)
+        if strings.compare(string(id), "if") == 0 {
             parse_expr(parser, expr, ast, params) or_return
             append(expr, Con_Jump{label_count})
             parse_expr(parser, expr, ast, params) or_return
@@ -497,8 +510,10 @@ parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, para
             if parser_peek(parser).kind == .EOL {
                 parser_next(parser)
             }
-            if parser_peek(parser).kind == .ID {
-                if strings.compare(parser_peek(parser).as.id, "else") == 0 {
+            token_id := parser_peek(parser)
+            if token_id.kind == .ID {
+                id := token_get_id(parser.tokens, token_id)
+                if strings.compare(string(id), "else") == 0 {
                     parser_next(parser)
                     parse_expr(parser, expr, ast, params) or_return
                     inject_at(expr, exprlen, Jump{label_count})
@@ -509,27 +524,29 @@ parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, para
             return true
         }
         for param in params {
-            if strings.compare(param.name, next.as.id) == 0 {
-                append(expr, next.as.id)
+            if strings.compare(string(param.name), string(id)) == 0 {
+                append(expr, id)
                 return true
             }
         }
-        if next.as.id not_in ast.functions {
-            fmt.printf("(%v:%v): Function does not exists: %#v", next.line, next.column, next.as.id)
+        if id not_in ast.functions {
+            fmt.printf("(%v:%v): Function does not exists: %#v", next.line, next.column, id)
             return
         }
 
         func_call: Func_Call
-        func_call.name = next.as.id
-        call_params := ast.functions[next.as.id].parameters
+        func_call.name = id
+        call_params := ast.functions[id].parameters
         for i in 0..<call_params.end - call_params.begin {
             parse_expr(parser, expr, ast, params) or_return
         }
         append(expr, func_call)
     case .NUM:
-        append(expr, next.as.num)
+        num := token_get_num(parser.tokens, next)
+        append(expr, num)
     case .OP:
-        switch next.as.op {
+        op := token_get_op(parser.tokens, next)
+        switch op {
         case .ADD: fallthrough
         case .SUB: fallthrough
         case .MUL: fallthrough
@@ -538,17 +555,17 @@ parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, para
         case .DIV:
             parse_expr(parser, expr, ast, params) or_return
             parse_expr(parser, expr, ast, params) or_return
-            append(expr, next.as.op)
+            append(expr, op)
         case .PRIME:
             parse_expr(parser, expr, ast, params) or_return
-            append(expr, next.as.op)
+            append(expr, op)
         }
     case .STR:
+        str := token_get_str(parser.tokens, next)
         append(expr, Push_Str{len(ast.strs)})
-        append(&ast.strs, next.as.str)
+        append(&ast.strs, string(str))
     case .LCPAR:
         for {
-            fmt.println(parser_peek(parser))
             if parser_peek(parser).kind == .RCPAR {
                 parser_next(parser)
                 break
@@ -558,7 +575,6 @@ parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, para
     case .EOL, .EOF:
         return
     case:
-        fmt.println(next.kind)      
         unimplemented()
     }
     
@@ -567,14 +583,12 @@ parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, para
 
 parser_expect :: proc(parser: ^Parser, expected: Token_Kind) -> (token: Token, ok: bool) {
     token = parser_next(parser)
-    if token.kind != expected {
-        return
-    }
-    return token, true
+    return token, token.kind == expected
 }
 
-parse :: proc(tokens: []Token, ast: ^AST) -> (ok: bool) {
-    parser := parser_init(tokens)
+parse :: proc(st: ^State) -> (ok: bool) {
+    parse_declarations(st) or_return
+    parser := parser_init(&st.tokens)
     
     for {
         next := parser_peek(&parser)
@@ -587,21 +601,27 @@ parse :: proc(tokens: []Token, ast: ^AST) -> (ok: bool) {
         }
         save := parser_save(parser)
         if decl, ok := parse_declaration(&parser); ok {
-            body_begin := len(ast.bodies)
-            def := &ast.functions[decl.id]
-            parse_expr(&parser, &ast.bodies, ast, ast.parameters[def.parameters.begin:def.parameters.end]) or_return
-            def.body = {body_begin, len(ast.bodies)} 
+            body_begin := len(st.ast.bodies)
+            def := &st.ast.functions[decl.id]
+            params := st.ast.parameters[def.parameters.begin:def.parameters.end]
+            parse_expr(&parser, &st.ast.bodies, &st.ast, params) or_return
+            def.body = {body_begin, len(st.ast.bodies)} 
             continue
         }
         parser_recover(&parser, save)
-        if parse_expr(&parser, &ast.main, ast, {}) do continue
+        if parse_expr(&parser, &st.ast.main, &st.ast, {}) do continue
 
         return
     }
     return true
 }
 
-type_check :: proc(instructions: []Instruction, params: []Func_Parameter, ast: ^AST, type_stack: ^[dynamic]Token_Builtin_Type) -> Token_Builtin_Type {
+type_check :: proc(
+    instructions: []Instruction,
+    params: []Func_Parameter,
+    ast: ^AST,
+    type_stack: ^[dynamic]Token_Builtin_Type
+) -> Token_Builtin_Type {
     loop: for i := 0; i < len(instructions); i += 1 {
         sw: switch v in instructions[i] {
         case Push_Num:
@@ -629,7 +649,7 @@ type_check :: proc(instructions: []Instruction, params: []Func_Parameter, ast: ^
             }
         case Push_Arg:
             for param, i in params {
-                if strings.compare(param.name, v) == 0 {
+                if strings.compare(string(param.name), string(v)) == 0 {
                     append(type_stack, param.type)
                     break sw
                 }
@@ -639,10 +659,9 @@ type_check :: proc(instructions: []Instruction, params: []Func_Parameter, ast: ^
             params := ast.functions[v.name].parameters
             params_count := params.end - params.begin
             #reverse for param in ast.parameters[params.begin:params.end] {
-                fmt.println(v.name, type_stack)
                 assert(pop(type_stack) == param.type)
             }
-            if strings.compare(v.name, "print") != 0 && strings.compare(v.name, "printstr") != 0 {
+            if strings.compare(string(v.name), "print") != 0 && strings.compare(string(v.name), "printstr") != 0 {
                 append(type_stack, Token_Builtin_Type.INTEGER)
             }
         case Jump:
@@ -683,14 +702,12 @@ type_check :: proc(instructions: []Instruction, params: []Func_Parameter, ast: ^
             append(type_stack, Token_Builtin_Type.STRING)
         }
     }
-    fmt.println(type_stack)
     assert(len(type_stack) <= 1)
     if len(type_stack) == 0 do return .VOID
     return type_stack[0]
 }
 
 generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params: []Func_Parameter, ast: ^AST) {
-    @(static) str_count := 0
     @(static) type_stack: [dynamic]Token_Builtin_Type
     clear(&type_stack)
 
@@ -734,7 +751,7 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
             }
         case Push_Arg:
             for param, i in params {
-                if strings.compare(param.name, inst) == 0 {
+                if strings.compare(string(param.name), string(inst)) == 0 {
                     fmt.sbprintf(buffer, "        push qword [rbp + %v]\n", (len(params) - i + 1)*8)
                     break sw
                 }
@@ -756,7 +773,7 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
                     unreachable()
                 }
             }
-            if strings.compare(inst.name, "print") == 0 {
+            if strings.compare(string(inst.name), "print") == 0 {
                 fmt.sbprintf(buffer, "        mov rax, [rsp]\n")
                 fmt.sbprintf(buffer, "        call print\n")
                 fmt.sbprintf(buffer, "        add rsp, %v\n", byte_pop)
@@ -770,7 +787,7 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
             else {
                 fmt.sbprintf(buffer, "        call %v\n", inst.name)
                 fmt.sbprintf(buffer, "        add rsp, %v\n", byte_pop)
-                if strings.compare(inst.name, "printstr") != 0 {
+                if strings.compare(string(inst.name), "printstr") != 0 {
                     // TODO: make return types, now its only numbers
                     fmt.sbprintf(buffer, "        push rax\n")
                 }
@@ -785,9 +802,8 @@ generate_expr_asm :: proc(buffer: ^strings.Builder, expr: []Instruction, params:
             fmt.sbprintf(buffer, ".label_%v:\n", inst.label)
         case Push_Str:
             fmt.sbprintf(buffer, "        sub rsp, 16\n")
-            fmt.sbprintf(buffer, "        mov qword [rsp+8], str%v\n", str_count)
+            fmt.sbprintf(buffer, "        mov qword [rsp+8], str%v\n", inst.id)
             fmt.sbprintf(buffer, "        mov qword [rsp], %v\n", len(ast.strs[inst.id]))
-            str_count += 1
         }
     }
 }
@@ -798,6 +814,7 @@ generate_asm :: proc(ast: ^AST) {
         fmt.printf("Error during file creation: %v", error)
         return
     }
+    defer os.close(out)
     
     buffer: strings.Builder
     defer strings.builder_destroy(&buffer)
@@ -864,8 +881,8 @@ generate_asm :: proc(ast: ^AST) {
     fmt.sbprintf(&buffer, "        ret\n")
 
     for name, def in ast.functions {
-        if strings.compare(name, "print") == 0 do continue
-        if strings.compare(name, "printstr") == 0 do continue
+        if strings.compare(string(name), "print") == 0 do continue
+        if strings.compare(string(name), "printstr") == 0 do continue
         fmt.sbprintf(&buffer, "%v:\n", name)
         fmt.sbprintf(&buffer, "        push rbp\n")
         fmt.sbprintf(&buffer, "        mov rbp, rsp\n")
@@ -887,60 +904,69 @@ generate_asm :: proc(ast: ^AST) {
     fmt.sbprintf(&buffer, "        mov rdi, 0\n")
     fmt.sbprintf(&buffer, "        syscall\n")
     os.write(out, buffer.buf[:])
-
-    os.close(out)
 }
 
-nuke :: proc(ast: ^AST, content: []byte, tokens: [dynamic]Token) {
-    delete(ast.main)
-    delete(ast.functions)
-    delete(ast.bodies)
-    delete(ast.parameters)
-    delete(content)
-    delete(tokens)
+state_nuke :: proc(st: ^State) {
+    delete(st.source)
+
+    delete(st.tokens.list)
+    delete(st.tokens.ids)
+    delete(st.tokens.nums)
+    delete(st.tokens.ops)
+    delete(st.tokens.strs)
+    delete(st.tokens.types)
+
+    delete(st.ast.main)
+    delete(st.ast.functions)
+    delete(st.ast.bodies)
+    delete(st.ast.parameters)
+    delete(st.ast.strs)
 }
 
-run :: proc() -> (main_ok: bool) {
-    ast: AST
-    tokens: [dynamic]Token
-    input: []byte
-    
-    defer nuke(&ast, input, tokens)
+State :: struct {
+    source: []byte,
+    tokens: Tokens,
+    ast: AST,
+}
+
+read_source :: proc(st: ^State) -> (ok: bool) {
     if len(os.args) < 2 {
         fmt.printf("Usage: ijaq <file>")
         return
     }
-     
+
     filename := os.args[1]
-    ok: bool
-    input, ok = os.read_entire_file_from_filename(filename)
+    st.source, ok = os.read_entire_file_from_filename(filename)
     if !ok {
         fmt.printf("Couldn't open a file: %v", filename)
         return
     }
-    def: Func_Def
-    tokens = lex(string(input)) or_return
+    return true
+}
+
+run :: proc() -> (ok: bool) {
+    st: State
+    defer state_nuke(&st)
+
+    read_source(&st) or_return
+    lex(&st) or_return
     
-    append(&ast.parameters, Func_Parameter{type = .INTEGER})
+    // TODO: Do something about builtin functions
+    def: Func_Def
+    append(&st.ast.parameters, Func_Parameter{type = .INTEGER})
     def.parameters.end = 1
-    ast.functions["print"] = def
-    append(&ast.parameters, Func_Parameter{type = .STRING})
+    st.ast.functions["print"] = def
+    append(&st.ast.parameters, Func_Parameter{type = .STRING})
     def.parameters.begin = 1
     def.parameters.end = 2
-    ast.functions["printstr"] = def
+    st.ast.functions["printstr"] = def
     
-    parser := parser_init(tokens[:])
-    parse_declarations(&parser, &ast) or_return
-    
-    parse(tokens[:], &ast) or_return
-    fmt.printf("%#v", ast)
-    generate_asm(&ast)
+    parse(&st) or_return
+    generate_asm(&st.ast)
     return true
 }
 
 main :: proc() {
-    if run() {
-        os.exit(0)
-    }
+    if run() { os.exit(0) }
     os.exit(69)
 }

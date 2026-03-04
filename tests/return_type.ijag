@@ -2,7 +2,7 @@ fact :: (i: Integer -> Integer) {
 	if == i 1 1
 	else * i fact - i 1
 }
-print fact 5
+print(fact(5))
 
 printbool :: (bool: Boolean ->) {
 	if bool print 1
@@ -13,7 +13,7 @@ check :: (-> Boolean)  {
 	== 1 2
 }
 
-printbool check
-printbool check
-printbool { == 1 2 }
-printbool { != 1 2 }
+printbool(check())
+printbool(check())
+printbool( == 1 2 )
+printbool( != 1 2 )

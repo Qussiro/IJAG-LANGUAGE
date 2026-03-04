@@ -33,6 +33,7 @@ Token_Kind :: enum {
     NUM,
     OP,
     TYPE,
+    KEYWORD,
 
 // Fields without payload
     DDOT,
@@ -50,6 +51,11 @@ Token_Kind :: enum {
     ARROW,
 }
 
+Token_Keyword :: enum {
+    IF,
+    ELSE,
+}
+
 Token :: struct {
     line   : int,
     column : int,
@@ -58,12 +64,13 @@ Token :: struct {
 }
 
 Tokens :: struct {
-    list  : [dynamic]Token,
-    ids   : [dynamic]Token_Id,
-    nums  : [dynamic]Token_Num,
-    ops   : [dynamic]Token_Op,
-    strs  : [dynamic]Token_Str,
-    types : [dynamic]Token_Builtin_Type,
+    list     : [dynamic]Token,
+    ids      : [dynamic]Token_Id,
+    nums     : [dynamic]Token_Num,
+    ops      : [dynamic]Token_Op,
+    strs     : [dynamic]Token_Str,
+    types    : [dynamic]Token_Builtin_Type,
+    keywords : [dynamic]Token_Keyword,
 }
 
 // NOTE: Idk about that
@@ -100,6 +107,11 @@ token_with_payload :: proc(tokens: ^Tokens, line, column: int, payload: $T) {
         token.handle = len(tokens.types)
         payload := (cast(^Token_Builtin_Type)cast(^any)&payload)^
         append(&tokens.types, payload)
+    case Token_Keyword:
+        token.kind = .KEYWORD
+        token.handle = len(tokens.keywords)
+        payload := (cast(^Token_Keyword)cast(^any)&payload)^
+        append(&tokens.keywords, payload)
     case:
         fmt.panicf("Unknown payload type: `%v`", typeid_of(T))
     }
@@ -331,6 +343,14 @@ lexer_next :: proc(lexer: ^Lexer, tokens: ^Tokens) -> (ok: bool) {
             token_with_payload(tokens, lexer.line, lexer.column, Token_Builtin_Type.BOOLEAN)
             return true
         }
+        if strings.compare(id, "if") == 0 {
+            token_with_payload(tokens, lexer.line, lexer.column, Token_Keyword.IF)
+            return true
+        }
+        if strings.compare(id, "else") == 0 {
+            token_with_payload(tokens, lexer.line, lexer.column, Token_Keyword.ELSE)
+            return true
+        }
         token_with_payload(tokens, lexer.line, lexer.column, Token_Id(id))
         return true
     }
@@ -495,32 +515,12 @@ parser_recover :: proc(parser: ^Parser, pos: int) {
     parser.current = pos
 }
 
-parse_declaration :: proc(parser: ^Parser, ast: ^AST) -> (error : enum{NONE, NOT_DECL, ETC}){
+parse_definition :: proc(parser: ^Parser, ast: ^AST, id: Token_Id) -> (ok: bool) {
     expr : Bind
     procedure : Proc
     
-    id: Token_Id
-    { 
-        token_id, ok := parser_expect(parser, .ID) 
-        if !ok do return .NOT_DECL
-        id = token_get_id(parser.tokens, token_id)
-    }
-    
-    if check_keywords(cast(string)id) do return .NOT_DECL
-    if _, ok := parser_expect(parser, .COL); !ok do return .NOT_DECL
-    
-    next := parser_next(parser)
-    #partial switch next.kind {
-    case .COL:
-        expr.mutable = false
-    case .EQ:
-        expr.mutable = true
-    case:
-        fmt.printfln("P(%v:%v): Expected ':' or '=', but got: %v", next.line, next.column, next.kind)
-        return .ETC
-    }
 
-    if parser_next(parser).kind != .LPAR do return .NOT_DECL
+    if parser_next(parser).kind != .LPAR do return
     
     param_count := len(ast.parameters)
     defer if error != .NONE {
@@ -592,7 +592,9 @@ parse_declaration :: proc(parser: ^Parser, ast: ^AST) -> (error : enum{NONE, NOT
     }
     procedure.parameters = Slice_Index{param_count, len(ast.parameters)}
     
+    procedure.retype = create_type(ast, Token_Builtin_Type.VOID)
     if parser_peek(parser).kind == .TYPE {
+        pop(&ast.builtin_types)
         _token_type := parser_next(parser)
         type := token_get_type(parser.tokens, _token_type)
         handle := len(ast.builtin_types)
@@ -616,6 +618,8 @@ parse_declaration :: proc(parser: ^Parser, ast: ^AST) -> (error : enum{NONE, NOT
     proc_type := Proc_Type{{begin, end}, procedure.retype}
     append(&ast.proc_types, proc_type)
     expr.type = Type{.PROC, handle}
+
+    parse_expr(parser, &ast.bodies, ast, ast.parameters[procedure.parameters.begin:procedure.parameters.end])
     ast.bindings[id] = expr 
     return .NONE
 }
@@ -637,7 +641,7 @@ parse_declarations :: proc(st: ^State) -> (ok: bool) {
     return true
 }
 
-parse_expr :: proc(parser: ^Parser, expr: ^[dynamic]Instruction, ast: ^AST, params: []Func_Parameter) -> (ok: bool) {
+parse_expr :: proc(parser: ^Parser, ast: ^AST, params: []Func_Parameter) -> (ok: bool) {
     @(static) label_count := 0
     next := parser_next(parser)
     #partial switch next.kind {
@@ -728,39 +732,91 @@ parser_expect :: proc(parser: ^Parser, expected: Token_Kind) -> (token: Token, o
 }
 
 parse :: proc(st: ^State) -> (ok: bool) {
-    parse_declarations(st) or_return
     parser := parser_init(&st.tokens)
     
-    for {
-        next := parser_peek(&parser)
-        if next.kind == .EOF {
-            break
-        }
-        if next.kind == .EOL {
-            parser_next(&parser)
-            continue
-        }
-        save := parser_save(parser)
-        next = parser_peek(&parser)
-        if next.kind == .ID {
-            id := token_get_id(&st.tokens, next)
-            switch parse_declaration(&parser, &st.ast) {
-            case .NONE:
-                body_begin := len(st.ast.bodies)
-                procedure := &st.ast.procedures[st.ast.bindings[id].handle]
-                parse_expr(&parser, &st.ast.bodies, &st.ast, get_parameters(&st.ast, id)) or_return
-                procedure.body = {body_begin, len(st.ast.bodies)} 
-                continue
-            case .NOT_DECL:
-            case .ETC:
-                unreachable()
+    loop: for {
+        next := parser_next(&parser)
+        switch next.kind {
+        case .ID:
+            next1 := parser_next(&parser)
+            #partial switch next1.kind {
+            case .COL:
+                next := parser_next(parser)
+                #partial switch next.kind {
+                case .COL:
+                    expr.mutable = false
+                case .EQ:
+                    expr.mutable = true
+                case:
+                    fmt.printfln("P(%v:%v): Expected ':' or '=', but got: %v", next.line, next.column, next.kind)
+                    return 
+                }
+                parse_definition(&parser, &st.ast) or_return
+            case .LPAR:
+                
             }
+        case .STR:
+        
+        case .NUM:
+        
+        case .OP:
+        
+        case .TYPE:
+        
+        case .DDOT:
+        
+        case .LPAR:
+        
+        case .RPAR:
+        
+        case .LSQPAR:
+        
+        case .RSQPAR:
+        
+        case .LCPAR:
+        
+        case .RCPAR:
+        
+        case .COL:
+        
+        case .EQ:
+        
+        case .EOL:
+        
+        case .EOF:
+            break loop
+        
+        case .COMMA:
+        
+        case .ARROW:
+        
+        case .KEYWORD:
+        
+        case:
+            unreachable()
         }
-        parser_recover(&parser, save)
-        if parse_expr(&parser, &st.ast.main, &st.ast, {}) do continue
+        // save := parser_save(parser)
+        // next = parser_peek(&parser)
+        // if next.kind == .ID {
+        //     id := token_get_id(&st.tokens, next)
+        //     switch parse_declaration(&parser, &st.ast) {
+        //     case .NONE:
+        //         body_begin := len(st.ast.bodies)
+        //         procedure := &st.ast.procedures[st.ast.bindings[id].handle]
+        //         parse_expr(&parser, &st.ast.bodies, &st.ast, get_parameters(&st.ast, id)) or_return
+        //         procedure.body = {body_begin, len(st.ast.bodies)} 
+        //         continue
+        //     case .NOT_DECL:
+        //     case .ETC:
+        //         unreachable()
+        //     }
+        // }
+        // parser_recover(&parser, save)
+        // if parse_expr(&parser, &st.ast.main, &st.ast, {}) do continue
 
-        return
+        // return
     }
+    
     return true
 }
 
@@ -902,7 +958,7 @@ type_check :: proc(
             append(type_stack, create_type(ast, Token_Builtin_Type.STRING))
         }
     }
-    // TODO: assert(len(type_stack) <= 1)
+    assert(len(type_stack) <= 1)
     if len(type_stack) == 0 do return create_type(ast, Token_Builtin_Type.VOID)
     return type_stack[0]
 }
@@ -1207,6 +1263,7 @@ run :: proc() -> (ok: bool) {
     }
     
     parse(&st) or_return
+    fmt.printf("%#v",st.ast)
     generate_asm(&st.ast)
     return true
 }
